@@ -88,7 +88,9 @@ class JarvisFilesPlugin : Plugin() {
                         require(from.isFile) { "Only individual files can be moved" }
                         require(!to.exists()) { "Destination already exists" }
                         to.parentFile?.mkdirs()
-                        require(from.renameTo(to)) { "Could not move file" }; "Moved."
+                        // Shared storage is often a separate filesystem from the private inbox.
+                        java.nio.file.Files.move(from.toPath(), to.toPath())
+                        "Moved."
                     }
                     "open" -> {
                         val target = vet(args.optString("target"))

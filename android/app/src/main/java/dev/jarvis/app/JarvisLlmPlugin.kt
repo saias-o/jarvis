@@ -119,25 +119,25 @@ class JarvisLlmPlugin : Plugin() {
     }
 
     @PluginMethod fun cancel(call: PluginCall) {
-        conversation?.cancelProcess()
+        runCatching { conversation?.cancelProcess() }
         call.resolve()
     }
 
     @PluginMethod fun unload(call: PluginCall) {
-        conversation?.cancelProcess()
+        runCatching { conversation?.cancelProcess() }
         background(call) { engine?.close(); engine = null; modelPath = ""; state() }
     }
 
     override fun handleOnPause() {
         releaseJob = scope.launch {
             delay(120_000)
-            conversation?.cancelProcess()
+            runCatching { conversation?.cancelProcess() }
             mutex.withLock { engine?.close(); engine = null; modelPath = "" }
         }
     }
     override fun handleOnResume() { releaseJob?.cancel() }
     override fun handleOnDestroy() {
-        conversation?.cancelProcess()
+        runCatching { conversation?.cancelProcess() }
         scope.launch { mutex.withLock { engine?.close(); engine = null }; scope.cancel() }
     }
 }
