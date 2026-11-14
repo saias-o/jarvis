@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { androidTools } from '../shared/android-agent.mjs'
 import { LOCAL_CONTEXT_BYTES, fitContext } from '../shared/context-window.mjs'
 import { deviceTools } from '../shared/tools.mjs'
-import { htmlToText, webTools } from '../shared/web-tools.mjs'
+import { htmlToText, webImage, webTools } from '../shared/web-tools.mjs'
 import { localTools } from '../bridge/local-tools.mjs'
 
 const phoneFiles = (run = async () => ({ result: '[]' })) => ({
@@ -155,6 +155,39 @@ test('web_fetch returns the words of a page, in pages, and refuses what is not t
   assert.equal(await fetch.run({ url: 'https://meteo.example/data' }), 'https://meteo.example/data\n{"temp":13}')
   assert.match(await fetch.run({ url: 'https://meteo.example/file.pdf' }), /application\/pdf file/)
   await assert.rejects(fetch.run({ url: 'https://meteo.example/gone' }), /answered 404/)
+})
+
+test('a picture from the web can be found and shown, even by a screen that cannot load the web', async () => {
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).toString('base64')
+  const { http, asked } = scripted({
+    'https://fr.wikipedia.example/wiki/Tour_Eiffel': { status: 200, headers: { 'content-type': 'text/html' },
+      data: `<html><head><title>Tour Eiffel</title><meta name="twitter:image" content="http://192.168.1.1/private.png">
+<meta content="//upload.example/eiffel.jpg?w=1200&amp;h=800" property="og:image"></head><body><main>${'La tour. '.repeat(40)}</main></body></html>` },
+    'https://upload.example/eiffel.jpg': { status: 302, headers: { Location: 'https://cdn.example/eiffel.png' }, data: '' },
+    'https://cdn.example/eiffel.png': (request) => {
+      assert.equal(request.binary, true)
+      // Android's encoder wraps its base64 in lines.
+      return { status: 200, headers: { 'Content-Type': 'image/png' }, data: `${png.slice(0, 6)}\n${png.slice(6)}\n` }
+    },
+    'https://cdn.example/huge.png': { status: 200, headers: { 'content-type': 'image/png' }, data: 'A'.repeat(4000) },
+  })
+  // What the model reads names the picture's address…
+  const page = await webTools(http)[1].run({ url: 'https://fr.wikipedia.example/wiki/Tour_Eiffel' })
+  assert.match(page, /^Tour Eiffel\nhttps:\/\/fr\.wikipedia\.example\/wiki\/Tour_Eiffel\nImage: https:\/\/upload\.example\/eiffel\.jpg\?w=1200&h=800\nLa tour\./)
+  assert.equal(asked.at(-1).binary, undefined)
+  // …and the phone turns that address into data its own page may display.
+  assert.equal(await webImage(http, 'https://upload.example/eiffel.jpg?w=1200&h=800'), `data:image/png;base64,${png}`)
+  await assert.rejects(webImage(http, 'https://fr.wikipedia.example/wiki/Tour_Eiffel'), /not an image file; use the Image: address/)
+  await assert.rejects(webImage(http, 'https://cdn.example/huge.png', { maxBytes: 1000 }), /too large/)
+  await assert.rejects(webImage(http, 'http://192.168.1.1/private.png'), /blocked host/)
+
+  // The shared show tool hands the address to the device's screen as it is.
+  let shown
+  const { tools, system } = await androidTools(phoneFiles(), { show: (blade) => { shown = blade }, http })
+  await tools.find((tool) => tool.name === 'show').run({ title: 'Tour Eiffel', image: 'https://upload.example/eiffel.jpg' })
+  assert.equal(shown.kind, 'image')
+  assert.equal(shown.url, 'https://upload.example/eiffel.jpg')
+  assert.match(system, /Pour montrer une image du web : web_search, web_fetch/)
 })
 
 test('the web tools never reach a private address, directly or by redirect', async () => {

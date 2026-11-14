@@ -52,7 +52,7 @@ function pageText(html) {
  * the model has just read chooses the next address, and the router, the PC
  * bridge and anything else private must stay out of reach.
  */
-async function request(http, raw, { method = 'GET', headers = {}, data, signal } = {}) {
+async function request(http, raw, { method = 'GET', headers = {}, data, binary = false, signal } = {}) {
   let url = vetTarget(raw)
   for (let hop = 0; ; hop++) {
     signal?.throwIfAborted()
@@ -68,6 +68,7 @@ async function request(http, raw, { method = 'GET', headers = {}, data, signal }
         url: url.href, method,
         headers: { 'User-Agent': UA, 'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8', ...headers },
         ...(data === undefined ? {} : { data }),
+        ...(binary ? { binary } : {}),
       }), aborted])
     } finally {
       signal?.removeEventListener('abort', stop)
@@ -87,6 +88,38 @@ async function request(http, raw, { method = 'GET', headers = {}, data, signal }
       text: typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? ''),
     }
   }
+}
+
+/**
+ * The picture a page declares for itself (what a shared link shows), so the
+ * model can put an image from the web on screen without guessing an address.
+ */
+function pageImage(html, base) {
+  for (const tag of html.match(/<meta\b[^>]*>/gi) ?? []) {
+    if (!/\b(property|name)\s*=\s*["']?(og:image(:secure_url|:url)?|twitter:image(:src)?)["'\s>]/i.test(tag)) continue
+    const content = /\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tag)
+    try {
+      const url = vetTarget(new URL(decode(content?.[1] ?? content?.[2] ?? content?.[3] ?? '').trim(), base).href).href
+      if (url.length <= 300) return url
+    } catch { /* not an address; the next tag may be */ }
+  }
+  return ''
+}
+
+/**
+ * A picture from the web as a data: address, for a screen that cannot load
+ * the web itself (the phone's page without a PC bridge to proxy through).
+ * The transport must answer a `binary` request with the body in base64.
+ */
+export async function webImage(http, url, { signal, maxBytes = 6 * 1024 * 1024 } = {}) {
+  const image = await request(http, url, { signal, binary: true, headers: { Accept: 'image/*' } })
+  if (image.status < 200 || image.status >= 300) throw new Error(`the site answered ${image.status}`)
+  if (!image.type.startsWith('image/')) {
+    throw new Error('that address is not an image file; use the Image: address web_fetch gives for a page')
+  }
+  const base64 = image.text.replace(/\s+/g, '')
+  if (base64.length * 0.75 > maxBytes) throw new Error('that image is too large to show')
+  return `data:${image.type};base64,${base64}`
 }
 
 async function duckduckgo(http, query, signal) {
@@ -124,9 +157,9 @@ async function exa(http, query, signal) {
 }
 
 /**
- * @param {(request: { url: string, method: string, headers: Record<string, string>, data?: unknown }) =>
+ * @param {(request: { url: string, method: string, headers: Record<string, string>, data?: unknown, binary?: boolean }) =>
  *   Promise<{ status: number, headers?: Record<string, string>, data: unknown }>} http
- *   Must NOT follow redirects itself.
+ *   Must NOT follow redirects itself. `binary` is only asked by webImage.
  * @param {{ limit?: number }} [options]  Characters one result may occupy in the model's context.
  */
 export function webTools(http, { limit = 5000 } = {}) {
@@ -166,7 +199,7 @@ export function webTools(http, { limit = 5000 } = {}) {
     },
     {
       name: 'web_fetch',
-      description: 'Read a web page as text, continuing from character offset from.',
+      description: 'Read a web page as text, continuing from character offset from. Its Image: line is the address of the page’s picture, to pass to show.',
       parameters: { type: 'object', properties: { url: { type: 'string' }, from: { type: 'number' } }, required: ['url'] },
       async run({ url, from }, { signal } = {}) {
         const page = await request(http, url, {
@@ -180,7 +213,8 @@ export function webTools(http, { limit = 5000 } = {}) {
         const title = markup ? htmlToText(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(page.text)?.[1] ?? '') : ''
         const all = markup ? pageText(page.text) : page.text.trim()
         const start = Math.max(0, Math.floor(Number(from) || 0))
-        const head = start ? '' : `${title ? `${title.slice(0, 120)}\n` : ''}${page.url.slice(0, 200)}\n`
+        const image = markup ? pageImage(page.text, page.url) : ''
+        const head = start ? '' : `${title ? `${title.slice(0, 120)}\n` : ''}${page.url.slice(0, 200)}\n${image ? `Image: ${image}\n` : ''}`
         const part = all.slice(start, start + Math.max(200, limit - head.length - 70))
         const end = start + part.length
         return head + (part || '[No readable text here; the page may need JavaScript.]') +

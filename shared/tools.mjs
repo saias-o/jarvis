@@ -132,7 +132,7 @@ export function deviceTools(platform, { page = 5000 } = {}) {
   if (platform.show) {
     tools.push({
       name: 'show',
-      description: 'Show text (one item per line) or an image on the screen instead of reading it aloud. image is a PC file path or a web address.',
+      description: 'Show text (one item per line) or an image on the screen instead of reading it aloud. image is a PC file path or the web address of an image.',
       parameters: schema({ title: string, text: string, image: string }, ['title']),
       async run({ title, text, image }) {
         const blade = { id: crypto.randomUUID(), title: String(title ?? '').trim().slice(0, 60) || 'DISPLAY', hold: 'turn' }

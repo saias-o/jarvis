@@ -8,6 +8,7 @@ import { boundedChat, LOCAL_CONTEXT_BYTES } from '../../shared/context-window.mj
 import { JarvisFiles, JarvisLlm, JarvisModels } from './android'
 import { readDeviceSettings } from './deviceSettings'
 import { CapacitorHttp } from '@capacitor/core'
+import { webImage, type WebHttp } from '../../shared/web-tools.mjs'
 import type { AskHandlers } from './anthropic'
 import { useStore } from '../store'
 
@@ -65,15 +66,23 @@ export async function ask(prompt: string, handlers: AskHandlers, files: string[]
     if (inference === 'device') await warm()
     controller.signal.throwIfAborted()
     const pcUrl = BRIDGE_HTTP_URL
+    // Native HTTP: the WebView's own fetch is bound by CORS. The web tools
+    // follow redirects themselves so that every hop is vetted.
+    const http: WebHttp = ({ binary, ...request }) => CapacitorHttp.request({
+      ...request, responseType: binary ? 'blob' : 'text', disableRedirects: true, connectTimeout: 10_000, readTimeout: 20_000,
+    })
     const phone = await androidTools(JarvisFiles, {
-      show: (blade) => {
-        // The viewer loads images through the PC bridge.
-        if (blade.kind === 'image' && inference !== 'pc') throw new Error('Connect the PC to show an image')
+      show: async (blade) => {
+        // The page may only load images from the PC bridge or from its own
+        // data. Without the PC, a picture from the web is fetched natively; a
+        // file stored on the PC stays out of reach.
+        if (blade.kind === 'image' && inference !== 'pc') {
+          if (!/^https?:\/\//i.test(blade.url ?? '')) throw new Error('Connect the PC to show a file stored on the PC')
+          blade = { ...blade, url: await webImage(http, blade.url!, { signal: controller.signal }) }
+        }
         useStore.getState().pushBlade(blade)
       },
-      // Native HTTP: the WebView's own fetch is bound by CORS. The web tools
-      // follow redirects themselves so that every hop is vetted.
-      http: (request) => CapacitorHttp.request({ ...request, responseType: 'text', disableRedirects: true, connectTimeout: 10_000, readTimeout: 20_000 }),
+      http,
       // On-device Gemma has a 4,096-token window; a PC model reads far more.
       context: inference === 'pc' ? undefined : LOCAL_CONTEXT_BYTES,
     })

@@ -30,10 +30,11 @@ export async function androidTools(files, { show, http, context } = {}) {
   }
   const system = `Tu es JARVIS sur le téléphone Android. Réponds en français, brièvement pour la voix.
 Date : ${new Date().toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })}.
-Tu peux lire et ranger les fichiers, écrire, mémoriser des faits${show ? ', afficher du texte' : ''}${http ? ' et chercher sur internet' : ''}. Les écritures sont autorisées.
+Tu peux lire et ranger les fichiers, écrire, mémoriser des faits${show ? ', afficher du texte ou une image' : ''}${http ? ' et chercher sur internet' : ''}. Les écritures sont autorisées.
 Ces outils sans préfixe agissent sur ce téléphone. Si des outils PC sont fournis, ils décrivent séparément leurs capacités. N'invente pas de résultat d'outil.
 ${http ? `Pour l'actualité ou un fait incertain, appelle web_search, puis web_fetch pour lire une page, au lieu de refuser.
-` : ''}Pour les fichiers du téléphone, appelle les outils Android. Aucun câble ni mode USB/MTP n'est nécessaire pour les inspecter.
+${show ? `Pour montrer une image du web : web_search, web_fetch d'un résultat, puis show avec image = l'adresse de sa ligne « Image: ».
+` : ''}` : ''}Pour les fichiers du téléphone, appelle les outils Android. Aucun câble ni mode USB/MTP n'est nécessaire pour les inspecter.
 Téléchargements / download = ${storage.root}/Download ; documents = ${storage.root}/Documents ; photos = ${storage.root}/DCIM.
 Accès au stockage partagé : ${storage.granted ? 'autorisé' : 'non autorisé : demander à ouvrir les réglages Android pour accorder cet accès'}.
 Tu ne peux pas lire les données privées des autres applications, les contacts, SMS ou notifications : aucun outil correspondant n'est installé. Ne prétends pas le contraire.
