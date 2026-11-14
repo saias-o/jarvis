@@ -1,4 +1,4 @@
-import { isAndroid } from './android'
+import { isAndroid, JarvisSpeech } from './android'
 import { startAndroidVoice } from './androidVoice'
 import { bridgeFetch } from './bridgeAuth'
 import { BRIDGE_HTTP_URL, VOICE_LANG } from '../config'
@@ -390,7 +390,7 @@ if (typeof window !== 'undefined') {
  * rather than surfacing later as an unexplained deafness, whichever engine runs.
  */
 export async function startVoice(h: VoiceHandlers): Promise<Voice> {
-  if (isAndroid) return startAndroidVoice(h)
+  if (isAndroid) return startAndroidVoice(JarvisSpeech, VOICE_LANG, h)
   try {
     await getMic()
   } catch (err) {

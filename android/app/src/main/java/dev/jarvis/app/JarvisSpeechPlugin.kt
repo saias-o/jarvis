@@ -133,8 +133,12 @@ class JarvisSpeechPlugin : Plugin(), RecognitionListener {
     override fun onPartialResults(results: Bundle?) = transcript(results, false)
     override fun onError(error: Int) {
         if (!active) return
-        // Service availability does not imply that this language is installed.
-        if (usingOnDevice && error in setOf(11, 12, 13)) {
+        android.util.Log.w("JARVIS-Speech", "Recognition error $error via ${if (usingOnDevice) "on-device" else "system"}")
+        // Service availability does not imply that this language works: the
+        // on-device engine can be installed without a usable model, and it then
+        // reports a client error rather than a language one. Anything but
+        // ordinary silence hands this language to the system recognizer.
+        if (usingOnDevice && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT && error != SpeechRecognizer.ERROR_NO_MATCH) {
             unsupportedLocally.add(recognitionLanguage)
             try {
                 startRecognizer(false)
