@@ -18,13 +18,13 @@ function parseArgs(raw) {
 
 export async function agentTurn(text, {
   chat, system = '', history = [], tools = [], images = [], signal,
-  onText, onTool, maxSteps = 6,
+  onText, onTool, onMessages, maxSteps = 6,
 }) {
   signal?.throwIfAborted()
   maxSteps = Math.max(1, Math.min(12, Math.floor(maxSteps) || 6))
   const messages = [
     { role: 'system', content: system ?? '' },
-    ...history.flatMap((exchange) => [
+    ...history.flatMap((exchange) => exchange.messages?.map((message) => ({ ...message, content: clip(message.content, 1200) })) ?? [
       { role: 'user', content: clip(exchange.user, 1200) },
       { role: 'assistant', content: clip(exchange.jarvis, 1200) },
     ]),
@@ -81,5 +81,8 @@ export async function agentTurn(text, {
       messages.push({ role: 'tool', tool_name: name, content: clip(result, 6000) })
     }
   }
+  // Retain observations as well as speech. A later turn needs paths returned
+  // by uploads and the outcomes of completed actions, not just their summary.
+  onMessages?.(messages.slice(1 + history.reduce((n, exchange) => n + (exchange.messages?.length ?? 2), 0)))
   return said.join(' ')
 }

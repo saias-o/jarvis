@@ -92,3 +92,32 @@ test('inference cancellation closes the SDK query and propagates to its process'
   assert.equal(options.abortController.signal.aborted, true)
   assert.equal(closed, true)
 })
+
+test('native client tool_use is forwarded to Android before the SDK can call it nonexistent', async () => {
+  let closed = false
+  const infer = createInference({ query: () => {
+    const session = (async function* () {
+      yield { type: 'assistant', message: { content: [
+        { type: 'text', text: 'Already moved.' },
+        { type: 'tool_use', name: 'pc_list_files', input: { folder: 'C:/Users/sandr/OneDrive' } },
+      ] } }
+      assert.fail('The SDK must not continue and turn a client proposal into a No such tool error')
+    })()
+    session.close = () => { closed = true }
+    return session
+  } })
+  const result = await infer({ messages: [{ role: 'user', content: 'Trouve Images sur le PC.' }], tools: [{
+    type: 'function', function: { name: 'pc_list_files', parameters: { type: 'object', properties: { folder: { type: 'string' } }, required: ['folder'] } },
+  }] })
+  assert.deepEqual(result.message, { content: '', tool_calls: [{ function: { name: 'pc_list_files', arguments: { folder: 'C:/Users/sandr/OneDrive' } } }] })
+  assert.equal(closed, true)
+})
+
+test('a native SDK tool absent from the client manifest is never forwarded', async () => {
+  const infer = createInference({ query: () => (async function* () {
+    yield { type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'dir' } }] } }
+    yield { type: 'result', subtype: 'success', structured_output: { content: 'Pas d’outil proposé.', calls: [] } }
+  })() })
+  const result = await infer({ messages: [{ role: 'user', content: 'test' }], tools: [] })
+  assert.deepEqual(result.message.tool_calls, [])
+})

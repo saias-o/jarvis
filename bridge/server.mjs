@@ -1046,9 +1046,11 @@ const handleRequest = async (req, res, viaRemote = false) => {
       let input
       try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { return json(400, { error: 'Invalid JSON' }) }
       if (!input || typeof input !== 'object') return json(400, { error: 'Invalid PC tool request' })
+      console.log(`[jarvis] PC tool: ${input.name}`)
       const result = await androidPcTools.run(input, controller.signal)
       if (!res.destroyed) return json(200, { result })
     } catch (err) {
+      console.warn('[jarvis] PC tool refused:', err.message)
       if (!res.destroyed) return json(403, { error: err.message })
     } finally {
       res.off('close', disconnected)
@@ -1078,7 +1080,9 @@ const handleRequest = async (req, res, viaRemote = false) => {
       }
       let input
       try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { return json(400, { error: 'Invalid JSON' }) }
-      console.log('[jarvis] Android inference (client-executed tools)')
+      console.log('[jarvis] Android inference tools:', input.tools?.map((tool) => tool.function?.name).join(', ') || '(none)')
+      const last = input.messages?.at(-1)
+      if (last?.role === 'tool' && /^(That failed:|There is no tool)/.test(last.content)) console.warn(`[jarvis] ${last.tool_name}: ${last.content}`)
       const result = await inferAndroid(input, controller.signal)
       if (!res.destroyed) return json(200, result)
     } catch (err) {

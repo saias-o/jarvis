@@ -12,7 +12,7 @@ import { useStore } from '../store'
 
 let active: AbortController | null = null
 let settled: Promise<unknown> = Promise.resolve()
-const history: Array<{ user: string; jarvis: string }> = []
+const history: Array<{ user: string; jarvis: string; messages: ChatMessage[] }> = []
 
 async function* nativeChat(messages: ChatMessage[], tools: unknown[], signal?: AbortSignal): AsyncGenerator<ChatChunk> {
   signal?.throwIfAborted()
@@ -107,13 +107,16 @@ export async function ask(prompt: string, handlers: AskHandlers, files: string[]
         : message), specs.filter((spec) => phoneNames.has((spec as { function: { name: string } }).function.name)), signal)
     }
     const question = files.length ? `${prompt}\nPièces jointes (chemins, données) : ${JSON.stringify(files)}` : prompt
+    let turnMessages: ChatMessage[] = []
     const text = await agentTurn(question, {
       chat: modelChat,
       system, tools, history: history.slice(-6), signal: controller.signal,
       maxSteps: inference === 'pc' ? 12 : 6,
+      onMessages: (messages) => { turnMessages = messages },
       onText: handlers.onText, onTool: (name) => { used.push(name); handlers.onTool(name) },
     })
-    history.push({ user: question, jarvis: text })
+    history.push({ user: question, jarvis: text, messages: turnMessages })
+    if (history.length > 6) history.splice(0, history.length - 6)
     return { text, tools: used }
   })()
   settled = operation

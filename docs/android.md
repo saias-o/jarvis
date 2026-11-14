@@ -88,6 +88,12 @@ move the received PC file to the requested folder and verify it, within the same
 loop. The desktop UI keeps its existing Windows agent. Update both the PC server
 and APK together.
 
+The inference adapter forwards client action proposals whether the model emits
+them in structured output or as native `tool_use` blocks; these are dispatched
+by Android, never executed inside the inference session. The existing Android
+conversation history retains completed tool calls and results as well as the
+spoken exchanges, so follow-up requests keep returned paths and action outcomes.
+
 `Download`, `Documents` and `DCIM` refer to the phone's shared storage. The
 `list_files` tool supports a `documents` filter and pagination. File permission
 state and the actual installed capabilities are included in the Android prompt.

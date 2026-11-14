@@ -3,7 +3,7 @@ export type ChatMessage = { role: string; content: string; tool_name?: string; t
 export type ChatChunk = { message?: { content?: string; tool_calls?: unknown[] } }
 export function agentTurn(text: string, options: {
   chat: (messages: ChatMessage[], tools: unknown[], signal?: AbortSignal) => AsyncIterable<ChatChunk>
-  system?: string; history?: Array<{ user: string; jarvis: string }>; tools?: Tool[]
+  system?: string; history?: Array<{ user: string; jarvis: string; messages?: ChatMessage[] }>; tools?: Tool[]
   images?: string[]; signal?: AbortSignal; onText?: (text: string) => void
-  onTool?: (name: string) => void; maxSteps?: number
+  onTool?: (name: string) => void; onMessages?: (messages: ChatMessage[]) => void; maxSteps?: number
 }): Promise<string>
