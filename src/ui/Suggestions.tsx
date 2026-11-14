@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useStore } from '../store'
+import { isAndroid } from '../lib/android'
 
 /**
  * Rotating example commands, shown only while idle.
@@ -11,7 +12,12 @@ import { useStore } from '../store'
  *
  * Each line is phrased the way you'd actually say it, not as a feature name.
  */
-const EXAMPLES = [
+const EXAMPLES = isAndroid ? [
+  'liste les documents dans Download',
+  'affiche les fichiers du dossier Documents',
+  'crée une note dans Documents/ma-note.txt',
+  'retiens que je préfère des réponses courtes',
+] : [
   'what happened in AI this week',
   'generate an image of the Mark Seven suit',
   'take a screenshot of my phone',
@@ -42,7 +48,7 @@ export function Suggestions() {
 
   return (
     <div className="suggest">
-      <span className="suggest-lead">try</span>
+      <span className="suggest-lead">{isAndroid ? 'touche le micro, puis dis' : 'try'}</span>
       <AnimatePresence mode="wait">
         <motion.span
           key={i}
@@ -52,7 +58,7 @@ export function Suggestions() {
           exit={{ opacity: 0, y: -6 }}
           transition={{ duration: 0.35 }}
         >
-          “hey jarvis, {EXAMPLES[i]}”
+          “{isAndroid ? '' : 'hey jarvis, '}{EXAMPLES[i]}”
         </motion.span>
       </AnimatePresence>
     </div>

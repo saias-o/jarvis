@@ -11,7 +11,11 @@ avec la boucle d'agent, les fichiers, la mémoire et les outils sur Android.
 L'ancien routage vers l'agent Windows était incorrect. Nouveau `/inference`
 isolé sans outils Windows/MCP/connecteurs ; mêmes outils Android avec PC ou
 Gemma. Les pièces jointes restent sur le téléphone. Filtre documents et état
-réel des permissions inclus. Validation physique et nouvelle version APK à suivre.
+réel des permissions inclus. APK versionCode 8 compilé et installé ; les journaux
+confirment les appels list_files exécutés par Android avec l'inférence PC.
+Les suggestions Android présentent désormais ses vrais outils ; le budget de
+12 étapes côté PC permet les listes paginées longues (Gemma reste à 6).
+Validation finale de la liste et de cette mise à jour APK à suivre.
 
 ### Reprise en cours (Codex, 14 novembre 2026)
 

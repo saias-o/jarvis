@@ -90,6 +90,7 @@ export async function ask(prompt: string, handlers: AskHandlers, files: string[]
     const text = await agentTurn(question, {
       chat: modelChat,
       system, tools, history: history.slice(-6), signal: controller.signal,
+      maxSteps: inference === 'pc' ? 12 : 6,
       onText: handlers.onText, onTool: (name) => { used.push(name); handlers.onTool(name) },
     })
     history.push({ user: question, jarvis: text })
