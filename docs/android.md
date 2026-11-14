@@ -63,7 +63,11 @@ when signing secrets are missing rather than issuing a new key.
    voice and an Android speech recognition service if the phone lacks them.
    Recognition prefers the on-device service when Android provides it; otherwise
    the system recognizer may use its provider's network service. There is no
-   background wake word. Tap Talk to start or interrupt.
+   background wake word. While JARVIS is open and the screen is on, say
+   « Hey Jarvis » (or « Jarvis ») to wake it; the microphone permission is
+   requested at launch. A command can follow the name in the same sentence.
+   Recognition pauses when the app is hidden and resumes on return. Tap Talk
+   to start or interrupt directly.
 5. Grant shared-storage access in the Android system screen to let JARVIS list,
    read, write, move and open files. `Android/data`, `Android/obb` and credential
    locations remain refused. Text reads are limited and paged. Memory stays in

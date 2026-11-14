@@ -1,4 +1,5 @@
 import type { Voice, VoiceHandlers } from './voice'
+import { wakePhrase } from '../../shared/wake-phrase.mjs'
 
 type Recognition = { text?: string; final?: boolean; error?: number }
 
@@ -22,6 +23,18 @@ export async function startAndroidVoice(speech: SpeechEngine, lang: string, h: V
   let starting = false
   let failures = 0
   let next = 0
+  let ended = 0
+  const audible = () => !globalThis.document?.hidden && ['wake', 'command'].includes(h.mode())
+
+  const suspend = () => {
+    listening = false
+    ended++
+    next = 0
+    void speech.stop()
+  }
+  // The native plugin cancels recognition on pause. Clear the JS session too,
+  // even if Android suspended the WebView before its next polling tick.
+  globalThis.document?.addEventListener('visibilitychange', suspend)
 
   // An engine that is starting up, offline or switching models recovers by
   // itself, so a failure never ends the loop. One lone failure followed by a
@@ -34,7 +47,7 @@ export async function startAndroidVoice(speech: SpeechEngine, lang: string, h: V
 
   const result = await speech.addListener('recognition', (event) => {
     if (stopped) return
-    if (event.final) { listening = false; next = Date.now() + 500 }
+    if (event.final) { ended++; listening = false; next = Date.now() + 500 }
     if (event.error) {
       if (SILENCE.includes(event.error)) failures = 0
       else if (event.error !== BUSY) {
@@ -45,31 +58,41 @@ export async function startAndroidVoice(speech: SpeechEngine, lang: string, h: V
       return
     }
     failures = 0
+    if (!audible()) return
+    if (h.mode() === 'wake') {
+      // Wait for Android's complete utterance: a partial wake would send an
+      // unfinished command or make the greeting speak over the rest of it.
+      const wake = event.final && wakePhrase(event.text ?? '')
+      if (wake) h.onWake(wake.trailing)
+      return
+    }
     if (h.mode() !== 'command') return
     if (event.text) h.onPartial(event.text)
     if (event.final && event.text?.trim()) h.onUtterance(event.text.trim())
   })
   const started = await speech.addListener('speechStart', () => {
-    if (!stopped && h.mode() === 'command') h.onSpeechStart()
+    if (!stopped && audible() && h.mode() === 'command') h.onSpeechStart()
   })
   const poll = setInterval(() => {
     if (stopped) return
-    if (h.mode() !== 'command' || globalThis.document?.hidden) {
-      if (listening) { listening = false; void speech.stop() }
+    if (!audible()) {
+      if (listening) suspend()
       return
     }
     if (listening || starting || Date.now() < next) return
     starting = true
+    const session = ended
     void speech.start({ lang }).then(() => {
-      if (stopped || h.mode() !== 'command') void speech.stop()
-      else listening = true
+      if (stopped || !audible()) void speech.stop()
+      else if (session === ended) listening = true
     }).catch((err) => fail(String(err?.message ?? err)))
       .finally(() => { starting = false })
   }, 200)
   return {
-    live: () => !stopped,
+    live: () => !stopped && listening,
     stop: () => {
       stopped = true; clearInterval(poll)
+      globalThis.document?.removeEventListener('visibilitychange', suspend)
       void speech.stop(); void result.remove(); void started.remove()
     },
   }

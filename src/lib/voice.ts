@@ -6,6 +6,7 @@ import { getMic } from './audio'
 import { speakingNow, speakingSince } from './tts'
 import { startVad, type Vad } from './vad'
 import { caps } from './capabilities'
+import { wakePhrase } from '../../shared/wake-phrase.mjs'
 
 /**
  * The voice loop.
@@ -80,19 +81,6 @@ const WAKE_DEBOUNCE = 1500
  * used to be silently discarded, so the wake word "just didn't work" with no
  * indication why. Better a rare false wake than a name that does not answer.
  */
-const WAKE =
-  /\b(?:hey|hi|ok|okay|yo|hé|eh|et)?\s*(?:jarvis|jarvys|jervis|jarvis's|travis|jarviss|java's|jarv|djarvis|jarvi)\b(?!'s)/i
-
-/** Everything after the wake phrase, which is usually the actual command. */
-function afterWake(text: string): string {
-  const m = WAKE.exec(text)
-  if (!m) return ''
-  return text
-    .slice(m.index + m[0].length)
-    .replace(/^[\s,.:;!?-]+/, '')
-    .trim()
-}
-
 // ---------------------------------------------------------------------------
 // Assembling one utterance out of several segments
 // ---------------------------------------------------------------------------
@@ -486,12 +474,13 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
       diag.heardAt = Date.now()
 
       if (mode === 'wake') {
-        if (WAKE.test(said) && Date.now() - lastWake > WAKE_DEBOUNCE) {
+        const wake = wakePhrase(said)
+        if (wake && Date.now() - lastWake > WAKE_DEBOUNCE) {
           lastWake = Date.now()
           diag.wakes++
           diag.dropped = ''
           diag.accepted++
-          h.onWake(afterWake(said))
+          h.onWake(wake.trailing)
         } else {
           drop(`heard "${said.slice(-40)}" — not his name`)
         }
@@ -663,12 +652,13 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     diag.heardAt = Date.now()
     if (mode === 'wake') {
       assemble.cancel()
-      if (WAKE.test(text) && Date.now() - lastWake > WAKE_DEBOUNCE) {
+      const wake = wakePhrase(text)
+      if (wake && Date.now() - lastWake > WAKE_DEBOUNCE) {
         lastWake = Date.now()
         diag.wakes++
         diag.dropped = ''
         diag.accepted++
-        h.onWake(afterWake(text))
+        h.onWake(wake.trailing)
       } else {
         drop(`heard "${text.slice(-40)}" — not his name`)
       }
@@ -711,10 +701,11 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
 
     if (mode === 'wake') {
       settled += fresh
-      if (WAKE.test(heard) && Date.now() - lastWake > WAKE_DEBOUNCE) {
+      const wake = wakePhrase(heard)
+      if (wake && Date.now() - lastWake > WAKE_DEBOUNCE) {
         lastWake = Date.now()
         diag.wakes++
-        const trailing = afterWake(heard)
+        const trailing = wake.trailing
         reset()
         h.onWake(trailing)
       } else if (settled.length > 400) {

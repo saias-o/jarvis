@@ -4,9 +4,8 @@ import { IS_FRENCH } from '../config'
 /**
  * The talk button — the space bar, for a device that has none.
  *
- * A phone cannot be relied on to hear a wake word: the page only listens while
- * it is on screen, and a pocket is a poor microphone. So on a touch screen
- * there is one thing to press. It wakes him, it cuts him off mid-answer, and
+ * The wake phrase works while the app is on screen. This button also lets a
+ * touch screen wake him directly. It cuts him off mid-answer, and
  * pressed while he is already listening it stands him down. Hidden by the
  * stylesheet wherever there is a keyboard and a fine pointer, where the space
  * bar already does this.

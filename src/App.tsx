@@ -13,6 +13,7 @@ import { Drop } from './ui/Drop'
 import { takeAttachments } from './lib/upload'
 import { useStore } from './store'
 import { startVoice, type Voice, type VoiceMode } from './lib/voice'
+import { withoutVocative } from '../shared/wake-phrase.mjs'
 import { createSpeaker, cycleVoice, currentVoiceName } from './lib/tts'
 import * as sfx from './lib/sfx'
 import * as music from './lib/music'
@@ -70,14 +71,6 @@ const FOLLOW_UP_MS = 11000
 const newId = () =>
   globalThis.crypto?.randomUUID?.() ??
   `id${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-
-/** The same mishearings voice.ts accepts for the wake word — otherwise a turn
- *  that woke him as "travis" gets that word sent on to the model as a question. */
-const NAME = '(?:jarvis|jarvys|jervis|travis|jarviss|java\'s|jarv)'
-/** A bare vocative — "Jarvis", "hey jarvis" — with nothing asked. */
-const BARE_NAME = new RegExp(`^(?:hey|hi|ok|okay|yo)?\\s*${NAME}[\\s,.!?]*$`, 'i')
-/** A leading vocative on a real command: "Jarvis, what's the weather". */
-const LEADING_NAME = new RegExp(`^(?:hey|hi|ok|okay|yo)?\\s*${NAME}\\b[\\s,.:!?-]*`, 'i')
 
 export default function App() {
   const store = useStore
@@ -327,11 +320,7 @@ export default function App() {
 
     // People keep using his name as a vocative once they're already talking to
     // him. Strip it rather than sending "jarvis" to the model as a question.
-    if (BARE_NAME.test(text)) {
-      listen(AWAIT_SPEECH_MS)
-      return
-    }
-    const said = text.replace(LEADING_NAME, '').trim()
+    const said = withoutVocative(text)
     if (!said) {
       listen(AWAIT_SPEECH_MS)
       return
@@ -388,7 +377,9 @@ export default function App() {
     // failure here costs the animation and nothing else — saying "voice input
     // is unavailable" was both alarming and untrue.
     try {
-      await startAnalyser()
+      // Android's native recognizer owns the microphone. Opening a second
+      // WebView capture can prevent it from hearing anything on some phones.
+      if (!isAndroid) await startAnalyser()
     } catch {
       console.warn(
         '[jarvis] no microphone stream — the reactor will not pulse with your ' +
@@ -601,8 +592,12 @@ export default function App() {
     await probeCapabilities()
     store.getState().setVoice(currentVoiceName())
 
-    if (BOOT_SEQUENCE) await armVoice()
-    else armOnFirstGesture()
+    if (BOOT_SEQUENCE || isAndroid) {
+      // Native speech asks for its Android permission itself and does not need
+      // a browser gesture. Arm it at launch, including standby wake detection.
+      await armVoice()
+      store.getState().setVoiceReady(true)
+    } else armOnFirstGesture()
 
     store.getState().setPhase('dormant')
   }
