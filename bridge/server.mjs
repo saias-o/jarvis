@@ -17,6 +17,7 @@
 
 import { WebSocketServer } from 'ws'
 import { query } from '@anthropic-ai/claude-agent-sdk'
+import { createInference } from './inference.mjs'
 import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
@@ -925,7 +926,7 @@ function corsFor(req) {
 const http = await import('node:http')
 
 /** The endpoints below; on the remote port, each one needs the access cookie. */
-const API_PATHS = new Set(['/health', '/file', '/img', '/media', '/pdf', '/page', '/tts', '/stt', '/upload'])
+const API_PATHS = new Set(['/inference', '/health', '/file', '/img', '/media', '/pdf', '/page', '/tts', '/stt', '/upload'])
 
 /**
  * Everything the remote port decides before a request reaches a handler:
@@ -995,6 +996,9 @@ async function remoteGate(req, res) {
   return true
 }
 
+const inferAndroid = createInference({ query, model: MODEL, effort: EFFORT, cwd: WORKSPACE, executable: process.env.JARVIS_CLAUDE_EXECUTABLE })
+let inferenceRequests = 0
+
 const handleRequest = async (req, res, viaRemote = false) => {
   if (viaRemote) {
     if (await remoteGate(req, res)) return
@@ -1019,6 +1023,42 @@ const handleRequest = async (req, res, viaRemote = false) => {
     return res.end()
   }
 
+  if (req.url === '/inference') {
+    const json = (status, value) => {
+      res.writeHead(status, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(value))
+    }
+    if (req.method !== 'POST') return json(405, { error: 'POST required' })
+    if (inferenceRequests >= 2) return json(429, { error: 'Inference busy' })
+    inferenceRequests++
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 120_000)
+    const disconnected = () => { if (!res.writableEnded) controller.abort() }
+    res.on('close', disconnected)
+    try {
+      const chunks = []
+      let bytes = 0
+      for await (const chunk of req) {
+        bytes += chunk.length
+        if (bytes > 256 * 1024) return json(413, { error: 'Inference request too large' })
+        chunks.push(chunk)
+      }
+      let input
+      try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { return json(400, { error: 'Invalid JSON' }) }
+      console.log('[jarvis] Android inference only (phone tools)')
+      const result = await inferAndroid(input, controller.signal)
+      if (!res.destroyed) return json(200, result)
+    } catch (err) {
+      console.error('[jarvis] Android inference:', err.message)
+      if (!res.destroyed) return json(err.message === 'Invalid inference request' ? 400 : 503, { error: 'Android inference unavailable' })
+    } finally {
+      clearTimeout(timeout)
+      res.off('close', disconnected)
+      inferenceRequests--
+    }
+    return
+  }
+
   if (req.method === 'GET' && req.url === '/health') {
     // The browser reads this once at boot to decide which voice engine to use.
     // Both premium paths ride the same ElevenLabs key, so both flags track it:
@@ -1030,6 +1070,7 @@ const handleRequest = async (req, res, viaRemote = false) => {
     return res.end(
       JSON.stringify({
         ok: true,
+        inference: 'android-v1',
         tts: eleven,
         stt: eleven,
         // Which brain is answering, for the interface's readout.

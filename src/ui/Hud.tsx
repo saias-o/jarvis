@@ -372,9 +372,9 @@ export function Hud() {
       )}
       {/* Said for as long as it is true: an answer from the stand-in is a
           smaller answer, and they should know which one they are getting. */}
-      {brain?.kind === 'local' && (
+      {(brain?.kind === 'local' || brain?.reason === 'Android') && (
         <div className="brain-local">
-          {IS_FRENCH ? 'CERVEAU LOCAL' : 'LOCAL BRAIN'} · {brain.model.toUpperCase()}
+          {brain.kind === 'claude' ? (IS_FRENCH ? 'MODÈLE PC' : 'PC MODEL') : (IS_FRENCH ? 'CERVEAU LOCAL' : 'LOCAL BRAIN')} · {brain.model.toUpperCase()}
           {brain.reason && brain.reason !== 'chosen' && (
             <span className="brain-why">{brainReason(brain.reason)}</span>
           )}

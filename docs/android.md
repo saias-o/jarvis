@@ -70,7 +70,22 @@ when signing secrets are missing rather than issuing a new key.
    the app's private `memory.md`. Writes are enabled for the phone tools.
 6. The clip imports small attachments (up to 16 MB) into the phone's private
    inbox. For larger files use Android's **Share → JARVIS** (up to 1 GB).
-   Attachments are streamed to the PC if a PC is chosen for that question.
+   Attachments stay on the phone, including when a PC supplies inference.
+   Requested text excerpts and tool results are sent to the model as context.
+
+All three brain modes use the same Android agent and phone tools. In PC mode,
+the app calls `/inference` over Tailscale; the PC uses its Claude login to return
+the next message or proposed phone tool calls. Android executes those calls and
+sends the results back for the next inference step. Windows tools, desktop MCP
+servers and account connectors are disabled on this endpoint. The desktop UI
+keeps its existing Windows agent. Update both the PC server and APK together.
+
+`Download`, `Documents` and `DCIM` refer to the phone's shared storage. The
+`list_files` tool supports a `documents` filter and pagination. File permission
+state and the actual installed capabilities are included in the Android prompt.
+Contacts, SMS, notifications and other apps' private data are not implemented.
+Automatic mode falls back to Gemma when the PC is unavailable; completed tool
+results stay in the same agent loop so file actions are not replayed.
 
 GPU initialization falls back to CPU if it fails. The model is unloaded after
 two minutes in the background and loaded again when needed. Download and import

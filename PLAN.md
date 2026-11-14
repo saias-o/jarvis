@@ -6,6 +6,13 @@ prises, et tout ce qui reste à faire, dans l'ordre. Il est écrit pour un agent
 
 Dernière mise à jour : 2026-11-14.
 
+Correction en cours : le mode PC de l'APK doit fournir uniquement l'inférence,
+avec la boucle d'agent, les fichiers, la mémoire et les outils sur Android.
+L'ancien routage vers l'agent Windows était incorrect. Nouveau `/inference`
+isolé sans outils Windows/MCP/connecteurs ; mêmes outils Android avec PC ou
+Gemma. Les pièces jointes restent sur le téléphone. Filtre documents et état
+réel des permissions inclus. Validation physique et nouvelle version APK à suivre.
+
 ### Reprise en cours (Codex, 14 novembre 2026)
 
 - Fork créé : `https://github.com/saias-o/jarvis` ; `origin` = fork,

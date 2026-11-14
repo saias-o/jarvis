@@ -1,14 +1,13 @@
-import { isAndroid, JarvisFiles } from './android'
+import { isAndroid } from './android'
 import * as device from './device'
 import { readDeviceSettings } from './deviceSettings'
 import { BRIDGE_HTTP_URL, selectBridge } from '../config'
-import { accessToken, bridgeFetch } from './bridgeAuth'
+import { bridgeFetch } from './bridgeAuth'
 import { BACKEND } from '../config'
 import * as direct from './anthropic'
 import * as bridge from './bridge'
 import type { AskHandlers, Msg } from './anthropic'
 import type { Blade, BrainInfo, Panel } from '../store'
-import { useStore } from '../store'
 
 export type { AskHandlers, Msg }
 export type { ConnectionState } from './bridge'
@@ -41,15 +40,7 @@ export async function ask(
     const turn = ++androidTurn
     await chooseAndroidBrain()
     if (turn !== androidTurn) return { text: '', tools: [] }
-    if (androidBrain === 'device') return device.ask(prompt, handlers, files)
-    useStore.getState().setBrain(null)
-    const remoteFiles = []
-    for (const path of files) {
-      const saved = await JarvisFiles.upload({ path, url: BRIDGE_HTTP_URL, token: accessToken() })
-      if (turn !== androidTurn) return { text: '', tools: [] }
-      remoteFiles.push(saved.path)
-    }
-    return bridge.ask(prompt, handlers, remoteFiles)
+    return device.ask(prompt, handlers, files, androidBrain)
   }
   return usingBridge
     ? bridge.ask(prompt, handlers, files)
@@ -66,10 +57,14 @@ export async function chooseAndroidBrain(): Promise<'pc' | 'device'> {
     if (pc !== BRIDGE_HTTP_URL) bridge.disconnect()
     selectBridge(pc)
     try {
-      const res = await bridgeFetch(`${pc}/health`, { signal: AbortSignal.timeout(2000) })
+      const res = await bridgeFetch(`${pc}/health`, { signal: AbortSignal.timeout(5000) })
       if (res.status === 401 && settings.mode === 'pc') throw new Error('Code d’accès requis : ouvrez Réglages Android.')
-      if (res.ok) { androidBrain = 'pc'; return androidBrain }
-    } catch (err) { if (settings.mode === 'pc' && err instanceof Error && /Code d’accès/.test(err.message)) throw err }
+      if (res.ok) {
+        const health = await res.json()
+        if (health.inference === 'android-v1') { androidBrain = 'pc'; return androidBrain }
+        if (settings.mode === 'pc') throw new Error('Mettez à jour le serveur PC : inférence Android indisponible.')
+      }
+    } catch (err) { if (settings.mode === 'pc' && err instanceof Error && /Code d’accès|Mettez à jour/.test(err.message)) throw err }
   }
   if (settings.mode === 'pc') throw new Error('PC injoignable. Vérifiez Tailscale et son adresse dans Réglages Android.')
   androidBrain = 'device'
@@ -80,7 +75,6 @@ export async function warm(): Promise<void> {
   if (isAndroid) {
     await chooseAndroidBrain()
     // Let the interface open before a multi-gigabyte model is downloaded.
-    if (androidBrain === 'pc') await bridge.warmBridge()
     return
   }
   if (usingBridge) await bridge.warmBridge()
@@ -89,25 +83,25 @@ export async function warm(): Promise<void> {
 /** The bridge reports its server list twice — from config on connect, then
  *  with live status once the agent boots — so the HUD subscribes. */
 export function watchServers(fn: (servers: string[]) => void): void {
-  if (usingBridge) bridge.watchServers(fn)
+  if (usingBridge && !isAndroid) bridge.watchServers(fn)
 }
 
 /** HUD panels are pushed mid-turn by the `display` tool, not returned by ask(). */
 export function watchPanels(fn: (panel: Panel) => void): void {
-  if (usingBridge) bridge.watchPanels(fn)
+  if (usingBridge && !isAndroid) bridge.watchPanels(fn)
 }
 
 /** Blades — the big surface — arrive the same way, from the `blade` tool. Like
  *  panels and the ui_* commands, this is a bridge capability: the direct path
  *  has no channel for a server to volunteer anything mid-turn. */
 export function watchBlades(fn: (blade: Blade) => void): void {
-  if (usingBridge) bridge.watchBlades(fn)
+  if (usingBridge && !isAndroid) bridge.watchBlades(fn)
 }
 
 /** Which brain is answering — Claude, or the local model while Claude is out
  *  of reach. Bridge only; the direct path has one brain and no fallback. */
 export function watchBrain(fn: (brain: BrainInfo) => void): void {
-  if (usingBridge) bridge.watchBrain(fn)
+  if (usingBridge && !isAndroid) bridge.watchBrain(fn)
 }
 
 /**
@@ -120,7 +114,7 @@ export function watchBrain(fn: (brain: BrainInfo) => void): void {
  * fires and the interface stays exactly as it ships.
  */
 export function watchUi(fn: (op: string, args: any) => void): void {
-  if (usingBridge) bridge.watchUi(fn)
+  if (usingBridge && !isAndroid) bridge.watchUi(fn)
 }
 
 /**
@@ -135,7 +129,7 @@ export function watchUi(fn: (op: string, args: any) => void): void {
 export function watchCapture(
   fn: (req: bridge.CaptureRequest) => Promise<bridge.CaptureResult>,
 ): void {
-  if (usingBridge) bridge.watchCapture(fn)
+  if (usingBridge && !isAndroid) bridge.watchCapture(fn)
 }
 
 /**
@@ -164,7 +158,7 @@ export function interrupt(): void {
  * so there is nothing that can be down until you try it.
  */
 export function isConnected(): boolean {
-  return isAndroid && androidBrain === 'device' ? true : usingBridge ? bridge.isConnected() : true
+  return isAndroid ? true : usingBridge ? bridge.isConnected() : true
 }
 
 /**
@@ -178,10 +172,11 @@ export function isConnected(): boolean {
 export function watchConnection(
   fn: (state: bridge.ConnectionState) => void,
 ): void {
-  if (usingBridge) bridge.watchConnection(fn)
+  if (usingBridge && !isAndroid) bridge.watchConnection(fn)
 }
 
 /** Labels for the HUD's SYSTEMS rail. */
 export function connectedLabels(): string[] {
+  if (isAndroid) return ['Fichiers Android', 'Mémoire Android']
   return usingBridge ? bridge.bridgeServers() : direct.connectedLabels()
 }

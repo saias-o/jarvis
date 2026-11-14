@@ -59,11 +59,16 @@ class JarvisFilesPlugin : Plugin() {
             try {
                 val args = call.getObject("args") ?: JSObject()
                 val name = call.getString("name") ?: ""
+                android.util.Log.i("JarvisFiles", "Running $name on Android")
                 val result: String = when (name) {
                     "list_files" -> {
                         val folder = vet(args.optString("folder", shared.path))
                         require(folder.isDirectory) { "Folder unavailable; check storage permission" }
+                        val documents = setOf("pdf", "doc", "docx", "odt", "ods", "xls", "xlsx", "ppt", "pptx", "txt", "md", "rtf", "csv", "json", "xml", "html", "htm", "epub")
+                        val kind = args.optString("kind", "all")
+                        require(kind in setOf("all", "documents")) { "Unknown file kind" }
                         val files = folder.listFiles().orEmpty().filter { it.name.contains(args.optString("contains"), true) }
+                            .filter { kind != "documents" || (it.isFile && it.extension.lowercase() in documents) }
                             .filter { runCatching { vet(it.path) }.isSuccess }.sortedBy { it.name.lowercase() }
                         val start = args.optInt("from", 0).coerceIn(0, files.size)
                         val page = StringBuilder()

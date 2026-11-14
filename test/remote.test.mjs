@@ -143,12 +143,13 @@ test('serves the interface without a code, and nothing outside it', async () => 
 
 test('every endpoint is closed until the code has been given', async () => {
   assert.deepEqual(JSON.parse((await call('/auth')).text), { required: true, ok: false })
-  for (const path of ['/health', '/file?path=/tmp/x.png', '/img?url=https://example.com/a.png', '/page?url=https://example.com']) {
+  for (const path of ['/inference', '/health', '/file?path=/tmp/x.png', '/img?url=https://example.com/a.png', '/page?url=https://example.com']) {
     assert.equal((await call(path)).status, 401, path)
   }
   assert.equal((await call('/tts', { method: 'POST', body: '{"text":"hi"}' })).status, 401)
   // Handing JARVIS a file writes to the computer's disk: not without the code.
   assert.equal((await call('/upload?name=x.txt', { method: 'POST', body: 'x' })).status, 401)
+  assert.equal((await call('/inference', { method: 'POST', body: '{}' })).status, 401)
   assert.equal(await wsHandshake({ Host: NAME, Origin: `https://${NAME}` }), 401)
 })
 
