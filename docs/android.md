@@ -96,7 +96,9 @@ one address per line, and save. Only HTTPS Tailscale names without ports or
 embedded credentials are accepted. The automatic mode probes health before
 dispatching a question; it never replays a question after tools may have run.
 
-If the PC keeps the access code enabled, pair in Android settings. A session
+The app normally connects without an access code: the Tailscale account is
+the identity. Pairing controls stay hidden unless the selected PC explicitly
+reports that its optional extra access code is required. A session
 token authorizes HTTP requests and the WebSocket handshake without relying on
 a cross-site cookie. Normal browser access keeps its original secure cookie.
 The session token is kept in WebView session storage, so pairing may be needed
