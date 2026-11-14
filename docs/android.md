@@ -93,6 +93,9 @@ them in structured output or as native `tool_use` blocks; these are dispatched
 by Android, never executed inside the inference session. The existing Android
 conversation history retains completed tool calls and results as well as the
 spoken exchanges, so follow-up requests keep returned paths and action outcomes.
+The bridge also supplies the PC's shared Windows known-folder locations to
+inference, so localized names such as Images resolve to the real Pictures folder
+even when Windows has redirected it into OneDrive.
 
 `Download`, `Documents` and `DCIM` refer to the phone's shared storage. The
 `list_files` tool supports a `documents` filter and pagination. File permission

@@ -129,6 +129,21 @@ test('read-only PC advertises no writes and execution cannot bypass this or the 
   await assert.rejects(writable.run({ name: 'write_file', args: { path: join(dir, 'outside.txt'), content: 'no' } }), /outside/)
 })
 
+test('PC context exposes actual redirected user folders only when their paths are shared', async () => {
+  const pictures = join(dir, 'OneDrive', 'Pictures')
+  const workspace = join(dir, 'workspace')
+  await mkdir(pictures, { recursive: true })
+  const pc = serverTools({ cwd: workspace, roots: [workspace, pictures],
+    folders: { MyPictures: pictures, MyDocuments: join(dir, 'not-shared'), Empty: '' } })
+  assert.deepEqual(pc.manifest.folders, { MyPictures: pictures })
+  const infer = createInference({ host: pc.manifest, query: ({ prompt, options }) => {
+    assert.equal(JSON.parse(prompt).host.folders.MyPictures, pictures)
+    assert.match(options.systemPrompt, /OneDrive redirections/)
+    return (async function* () { yield { type: 'result', subtype: 'success', structured_output: { content: '', calls: [] } } })()
+  } })
+  await infer({ messages: [{ role: 'user', content: 'Range le fichier dans Images.' }], tools: [] })
+})
+
 test('moving a PC attachment never replaces an existing destination', async () => {
   const from = join(dir, 'source.txt'), to = join(dir, 'existing.txt')
   await writeFile(from, 'source')

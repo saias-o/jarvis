@@ -997,8 +997,8 @@ async function remoteGate(req, res) {
   return true
 }
 
-const inferAndroid = createInference({ query, model: MODEL, effort: EFFORT, cwd: WORKSPACE, executable: process.env.JARVIS_CLAUDE_EXECUTABLE })
 const androidPcTools = pcTools({ allowWrites: ALLOW_WRITES, cwd: WORKSPACE, roots: TOOL_ROOTS })
+const inferAndroid = createInference({ query, model: MODEL, effort: EFFORT, cwd: WORKSPACE, executable: process.env.JARVIS_CLAUDE_EXECUTABLE, host: androidPcTools.manifest })
 let inferenceRequests = 0
 
 const handleRequest = async (req, res, viaRemote = false) => {
