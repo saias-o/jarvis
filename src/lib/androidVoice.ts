@@ -15,7 +15,9 @@ export async function startAndroidVoice(h: VoiceHandlers): Promise<Voice> {
       // Silence is an ordinary end of a one-shot Android recognition session.
       if (![6, 7, 8].includes(event.error)) {
         failed = true
-        h.onError(`Reconnaissance Android indisponible (${event.error}).`)
+        h.onError([12, 13].includes(event.error)
+          ? 'Le moteur vocal Android n’a pas le français. Activez ou téléchargez le français dans les réglages de reconnaissance vocale du téléphone.'
+          : `Reconnaissance Android indisponible (${event.error}).`)
       }
       return
     }

@@ -17,6 +17,11 @@ class JarvisSpeechPlugin : Plugin(), RecognitionListener {
     private var tts: TextToSpeech? = null
     private var ready = false
     private var active = false
+    private var usingOnDevice = false
+    private var recognizerGeneration = 0
+    private var recognitionIntent: Intent? = null
+    private var recognitionLanguage = "fr-FR"
+    private val unsupportedLocally = mutableSetOf<String>()
     private val spoken = mutableMapOf<String, PluginCall>()
 
     override fun load() {
@@ -53,18 +58,45 @@ class JarvisSpeechPlugin : Plugin(), RecognitionListener {
             try {
                 if (active) { call.resolve(); return@runOnUiThread }
                 require(SpeechRecognizer.isRecognitionAvailable(context)) { "No speech recognition service installed" }
-                if (recognizer == null) recognizer = if (Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context))
-                    SpeechRecognizer.createOnDeviceSpeechRecognizer(context) else SpeechRecognizer.createSpeechRecognizer(context)
-                recognizer!!.setRecognitionListener(this)
+                recognitionLanguage = call.getString("lang") ?: "fr-FR"
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                     .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE, call.getString("lang") ?: "fr-FR")
+                    .putExtra(RecognizerIntent.EXTRA_LANGUAGE, recognitionLanguage)
                     .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                active = true
-                recognizer!!.startListening(intent)
+                recognitionIntent = intent
+                val offline = Build.VERSION.SDK_INT >= 31 &&
+                    SpeechRecognizer.isOnDeviceRecognitionAvailable(context) &&
+                    recognitionLanguage !in unsupportedLocally
+                startRecognizer(offline)
                 call.resolve()
             } catch (e: Exception) { active = false; call.reject(e.message ?: "Recognition failed", e) }
         }
+    }
+
+    private fun startRecognizer(offline: Boolean) {
+        if (recognizer == null || usingOnDevice != offline) {
+            recognizerGeneration++
+            recognizer?.destroy()
+            usingOnDevice = offline
+            recognizer = if (offline && Build.VERSION.SDK_INT >= 31)
+                SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+                else SpeechRecognizer.createSpeechRecognizer(context)
+            val version = recognizerGeneration
+            recognizer!!.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) { if (version == recognizerGeneration) this@JarvisSpeechPlugin.onReadyForSpeech(params) }
+                override fun onBeginningOfSpeech() { if (version == recognizerGeneration) this@JarvisSpeechPlugin.onBeginningOfSpeech() }
+                override fun onRmsChanged(value: Float) { if (version == recognizerGeneration) this@JarvisSpeechPlugin.onRmsChanged(value) }
+                override fun onBufferReceived(buffer: ByteArray?) { if (version == recognizerGeneration) this@JarvisSpeechPlugin.onBufferReceived(buffer) }
+                override fun onEndOfSpeech() { if (version == recognizerGeneration) this@JarvisSpeechPlugin.onEndOfSpeech() }
+                override fun onError(error: Int) { if (version == recognizerGeneration) this@JarvisSpeechPlugin.onError(error) }
+                override fun onResults(results: Bundle?) { if (version == recognizerGeneration) this@JarvisSpeechPlugin.onResults(results) }
+                override fun onPartialResults(results: Bundle?) { if (version == recognizerGeneration) this@JarvisSpeechPlugin.onPartialResults(results) }
+                override fun onEvent(type: Int, params: Bundle?) { if (version == recognizerGeneration) this@JarvisSpeechPlugin.onEvent(type, params) }
+            })
+        }
+        active = true
+        android.util.Log.i("JARVIS-Speech", "Recognition $recognitionLanguage via ${if (offline) "on-device" else "system"}")
+        recognizer!!.startListening(recognitionIntent ?: error("No recognition request"))
     }
 
     @PluginMethod fun stop(call: PluginCall) {
@@ -100,6 +132,17 @@ class JarvisSpeechPlugin : Plugin(), RecognitionListener {
     override fun onResults(results: Bundle?) = transcript(results, true)
     override fun onPartialResults(results: Bundle?) = transcript(results, false)
     override fun onError(error: Int) {
+        if (!active) return
+        // Service availability does not imply that this language is installed.
+        if (usingOnDevice && error in setOf(11, 12, 13)) {
+            unsupportedLocally.add(recognitionLanguage)
+            try {
+                startRecognizer(false)
+                return
+            } catch (e: Exception) {
+                android.util.Log.w("JARVIS-Speech", "System recognition could not start", e)
+            }
+        }
         active = false
         notifyListeners("recognition", JSObject().put("error", error).put("final", true))
     }

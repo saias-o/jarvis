@@ -25,6 +25,7 @@ const statusText: Record<Phase, string> = {
  */
 function brainReason(reason: string): string {
   const fr: Record<string, string> = {
+    Android: 'SUR LE TÉLÉPHONE',
     offline: 'HORS LIGNE',
     rate_limit: 'LIMITE D’USAGE ATTEINTE',
     authentication_failed: 'CONNEXION CLAUDE EXPIRÉE',
@@ -32,6 +33,7 @@ function brainReason(reason: string): string {
     overloaded: 'CLAUDE SURCHARGÉ',
   }
   const en: Record<string, string> = {
+    Android: 'ON THIS PHONE',
     offline: 'OFFLINE',
     rate_limit: 'USAGE LIMIT REACHED',
     authentication_failed: 'CLAUDE LOGIN EXPIRED',

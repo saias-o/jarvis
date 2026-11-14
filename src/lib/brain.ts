@@ -8,6 +8,7 @@ import * as direct from './anthropic'
 import * as bridge from './bridge'
 import type { AskHandlers, Msg } from './anthropic'
 import type { Blade, BrainInfo, Panel } from '../store'
+import { useStore } from '../store'
 
 export type { AskHandlers, Msg }
 export type { ConnectionState } from './bridge'
@@ -41,6 +42,7 @@ export async function ask(
     await chooseAndroidBrain()
     if (turn !== androidTurn) return { text: '', tools: [] }
     if (androidBrain === 'device') return device.ask(prompt, handlers, files)
+    useStore.getState().setBrain(null)
     const remoteFiles = []
     for (const path of files) {
       const saved = await JarvisFiles.upload({ path, url: BRIDGE_HTTP_URL, token: accessToken() })
