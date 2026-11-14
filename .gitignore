@@ -31,3 +31,6 @@ public/mediapipe/
 *.keystore
 
 .android-signing/
+
+.tools/
+artifacts/
