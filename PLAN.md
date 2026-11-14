@@ -40,12 +40,14 @@ Dernière mise à jour : 2026-11-14.
   a refusé le lancement persistant avec `--writes`. `.env.local` conserve les
   préférences utilisateur ; le processus a un override en lecture seule.
 - APK de test local : `artifacts/JARVIS-Android14.apk` (dossier ignoré par Git).
-  VersionCode 6 installée, avec correction du micro et sans champ de code superflu.
+  VersionCode 7 installée, avec corrections du micro et du contexte, sans champ de code superflu.
 - Régression réelle sur les téléchargements : résultat de fichiers trop long
   (4189 tokens pour une fenêtre de 4096). Correctif : listes Android paginées,
   lectures courtes, contexte borné et nouvelle tentative uniquement avant tout
-  jeton émis. Sept tests de contexte ajoutés ; APK corrigé à compiler/installer.
-- Restent : valider les outils de fichiers natifs et le service
+  jeton émis. Sept tests de contexte ajoutés ; APK versionCode 7 compilé et installé.
+  Le test réel du dossier Download (367 éléments) affiche les vrais fichiers
+  sur Gemma sans nouveau débordement dans les journaux.
+- Restent : valider les écritures/déplacements natifs et le service
   de premier plan optionnel ; phase B non commencée. Pas d'Ollama réel sur PC1.
 - Correctif PC : Vite ignore désormais `artifacts/`, `android/` et les outils de
   session, pour éviter EBUSY sur l'APK pendant une installation USB. Les secrets
