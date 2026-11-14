@@ -17,9 +17,13 @@ export async function androidTools(files, show) {
     run: async (args, { signal }) => { signal?.throwIfAborted(); return (await files.run({ name, args })).result },
   }))
   tools.push({
-    name: 'show', description: 'Show text on the screen instead of reading it aloud.',
-    parameters: { type: 'object', properties: { title: { type: 'string' }, text: { type: 'string' } }, required: ['title', 'text'] },
-    run: async ({ title, text }) => { await show(title, text); return 'On screen.' },
+    name: 'show', description: 'Show text or an image on the screen instead of reading it aloud. For an image, give its absolute PC file path or web URL in image; the viewer loads it through the connected PC bridge.',
+    parameters: { type: 'object', properties: { title: { type: 'string' }, text: { type: 'string' }, image: { type: 'string' } }, required: ['title'] },
+    run: async ({ title, text, image }) => {
+      if (!text && !image) throw new Error('Give text or an image to show')
+      await show(title, text, image)
+      return 'On screen.'
+    },
   })
   return { tools, system: `Tu es JARVIS sur le téléphone Android. Réponds en français, brièvement pour la voix.
 Tu peux lire et ranger les fichiers, écrire, mémoriser des faits et afficher du texte. Les écritures sont autorisées.

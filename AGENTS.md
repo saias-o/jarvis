@@ -24,6 +24,9 @@ transmis au modèle. Vérifier l’action avant d’annoncer sa réussite.
   expose les outils du téléphone ; `shared/pc-agent.mjs` ceux du PC connecté.
   Les outils `pc_*` agissent sur le PC, les outils de fichiers sans préfixe sur
   Android ; `upload_to_pc` utilise le transfert natif existant.
+  En mode complet, `pc_run_command` réutilise le shell du PC. Ne pas réduire
+  silencieusement ses capacités lors d’un changement de transport ou de modèle.
+  `show(image=chemin_PC)` ouvre le visualiseur d’images existant sur le téléphone.
 - Le PC peut fournir l’inférence via `/inference` sans exécuter lui-même les
   appels proposés. La boucle Android les distribue au bon appareil ; les outils
   PC passent par `/pc-tools` et respectent les permissions du bridge.

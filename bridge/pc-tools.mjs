@@ -23,8 +23,11 @@ function knownFolders() {
 
 /** Reuse the PC's file tools and policy; Android keeps its own agent loop. */
 export function pcTools({ allowWrites = false, cwd, roots, folders = knownFolders() }) {
-  const names = new Set(['list_files', 'read_file', 'write_file', 'move_file', 'open'])
-  const tools = localTools({ allowWrites, cwd, roots }).filter((tool) => names.has(tool.name))
+  const names = new Set(['list_files', 'read_file', 'write_file', 'move_file', 'open', 'run_command'])
+  // The full desktop agent already has a shell when actions are enabled.
+  // Preserve that capability for Android callers instead of reducing the PC
+  // to a file server. Reuse the existing executor and write gate.
+  const tools = localTools({ allowWrites, cwd, roots, shell: allowWrites }).filter((tool) => names.has(tool.name))
   return {
     manifest: {
       home: homedir(), platform: process.platform, roots, allowWrites,

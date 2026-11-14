@@ -83,7 +83,12 @@ has no desktop tools, MCP servers or account connectors. The app also discovers
 the PC's file tools through authenticated `GET /pc-tools`, exposes them to the
 LLM as `pc_*`, and dispatches their calls through `POST /pc-tools`. These reuse
 the existing PC file tools and obey its write setting, allowed roots and
-credential restrictions. The LLM can inspect both devices, upload a phone file,
+credential restrictions. With writes enabled, `pc_run_command` also reuses the
+PC command executor, with the same user-account access as the full desktop
+agent's shell. This preserves general OS capabilities such as screen capture,
+instead of limiting Android callers to files. The existing `show` tool accepts
+an image path and opens the existing image viewer through the PC media bridge.
+The LLM can inspect both devices, upload a phone file,
 move the received PC file to the requested folder and verify it, within the same
 loop. The desktop UI keeps its existing Windows agent. Update both the PC server
 and APK together.

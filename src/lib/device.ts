@@ -7,6 +7,7 @@ import { BRIDGE_HTTP_URL } from '../config'
 import { boundedChat } from '../../shared/context-window.mjs'
 import { JarvisFiles, JarvisLlm, JarvisModels } from './android'
 import { readDeviceSettings } from './deviceSettings'
+import { mediaUrl } from './mediaUrl'
 import type { AskHandlers } from './anthropic'
 import { useStore } from '../store'
 
@@ -63,13 +64,18 @@ export async function ask(prompt: string, handlers: AskHandlers, files: string[]
   const operation = (async () => {
     if (inference === 'device') await warm()
     controller.signal.throwIfAborted()
-    const phone = await androidTools(JarvisFiles, (title, text) => {
+    const pcUrl = BRIDGE_HTTP_URL
+    const phone = await androidTools(JarvisFiles, (title, text, image) => {
+      if (image) {
+        if (inference !== 'pc') throw new Error('Connect the PC to show a PC image')
+        useStore.getState().pushBlade({ id: crypto.randomUUID(), kind: 'image', title: String(title).slice(0, 60), url: mediaUrl(image, pcUrl), size: 'full', hold: 'turn' })
+        return
+      }
       const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
       useStore.getState().pushBlade({ id: crypto.randomUUID(), kind: 'markup', title: String(title).slice(0, 60), html: `<p>${escape(text).replace(/\n/g, '<br>')}</p>`, size: 'compact', hold: 'turn' })
     })
     // The endpoint executes the PC's existing file tools under its own policy.
     // Keep both sets in the same loop, so the LLM chooses the device and steps.
-    const pcUrl = BRIDGE_HTTP_URL
     const pcToken = accessToken()
     let pc: { tools: typeof phone.tools; system: string } = { tools: [], system: '' }
     if (inference === 'pc') {

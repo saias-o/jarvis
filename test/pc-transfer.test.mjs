@@ -110,7 +110,7 @@ test('Android agent transfers an attachment through existing upload, moves it on
 
 test('PC execution refuses unoffered tools and credential files', async () => {
   for (const input of [
-    { name: 'run_command', args: { command: 'echo no' } },
+    { name: 'Bash', args: { command: 'echo no' } },
     { name: 'write_file', args: { path: join(dir, '.env'), content: 'no' } },
     { name: 'read_file', args: null },
   ]) {
@@ -123,10 +123,34 @@ test('read-only PC advertises no writes and execution cannot bypass this or the 
   const roots = [join(dir, 'workspace')]
   const readonly = serverTools({ allowWrites: false, cwd: roots[0], roots })
   assert.deepEqual(readonly.manifest.tools.map((t) => t.name), ['list_files', 'read_file'])
+  await assert.rejects(readonly.run({ name: 'run_command', args: { command: 'echo no' } }), /write access/)
   await assert.rejects(readonly.run({ name: 'move_file', args: { from: 'a', to: 'b' } }), /write access/)
   await assert.rejects(readonly.run({ name: 'read_file', args: { path: join(dir, 'outside.txt') } }), /outside/)
   const writable = serverTools({ allowWrites: true, cwd: roots[0], roots })
   await assert.rejects(writable.run({ name: 'write_file', args: { path: join(dir, 'outside.txt'), content: 'no' } }), /outside/)
+})
+
+test('Android retains the existing PC command capability when writes are enabled', async () => {
+  const pc = await pcTools(fetch, url, { upload: async () => ({ path: '' }) }, () => '')
+  const command = pc.tools.find((tool) => tool.name === 'pc_run_command')
+  assert.ok(command, 'The Android path must not silently reduce the full PC agent to file tools')
+  assert.match(pc.system, /capture de l’écran du PC/)
+  const output = await command.run({ command: process.platform === 'win32'
+    ? "Write-Output 'pc-capability-restored'" : "printf 'pc-capability-restored'" })
+  assert.match(output, /pc-capability-restored/)
+  assert.ok(pc.tools.length + 8 <= 16, 'The combined Android tool manifest must fit inference validation')
+})
+
+test('existing Android show tool displays PC images as well as text', async () => {
+  let shown
+  const phone = await androidTools({
+    status: async () => ({ root: '/storage/emulated/0', inbox: '/phone/inbox', granted: true }),
+    readMemory: async () => ({ text: '' }),
+  }, (title, text, image) => { shown = { title, text, image } })
+  const show = phone.tools.find((tool) => tool.name === 'show')
+  assert.equal(await show.run({ title: 'Écran du PC', image: 'C:/workspace/screen.png' }), 'On screen.')
+  assert.deepEqual(shown, { title: 'Écran du PC', text: undefined, image: 'C:/workspace/screen.png' })
+  await assert.rejects(show.run({ title: 'Empty' }), /text or an image/)
 })
 
 test('PC context exposes actual redirected user folders only when their paths are shared', async () => {
