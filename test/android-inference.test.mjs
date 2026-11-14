@@ -11,8 +11,8 @@ test('PC inference lists Android Download using the phone tools and retains phon
   const { tools, system } = await androidTools({
     status: async () => ({ root: '/storage/emulated/0', inbox: '/data/user/0/dev.jarvis.app/files/inbox', granted: true }),
     readMemory: async () => ({ text: '' }),
-    run: async (call) => { executed.push(call); return { result: 'facture-telephone.pdf\n[End; 1 total]' } },
-  }, (title, text) => { shown = { title, text } })
+    run: async (call) => { executed.push(call); return { result: JSON.stringify([{ name: 'facture-telephone.pdf', dir: false, size: 1200 }]) } },
+  }, { show: (blade) => { shown = blade } })
   let step = 0
   const infer = createInference({ model: 'fake-pc', query: ({ prompt, options }) => {
     const input = JSON.parse(prompt)
@@ -46,7 +46,7 @@ test('PC inference lists Android Download using the phone tools and retains phon
     system, tools, chat: (messages, specs, signal) => remoteChat(fetcher, 'https://pc.example.ts.net', messages, specs, signal),
   })
   assert.deepEqual(executed, [{ name: 'list_files', args: { folder: '/storage/emulated/0/Download' } }])
-  assert.equal(shown.text, 'facture-telephone.pdf')
+  assert.equal(shown.html, '<p>facture-telephone.pdf</p>')
   assert.equal(text, 'Un document sur votre téléphone, affiché à l’écran.')
   assert.equal(step, 3)
 })

@@ -1,0 +1,183 @@
+// The device agent's tool catalogue: one definition for the phone and the PC,
+// and the web tools they share.
+//
+//   node --test test/
+//
+// No network: a scripted transport stands in for Capacitor's client and net.mjs.
+
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { androidTools } from '../shared/android-agent.mjs'
+import { LOCAL_CONTEXT_BYTES, fitContext } from '../shared/context-window.mjs'
+import { deviceTools } from '../shared/tools.mjs'
+import { htmlToText, webTools } from '../shared/web-tools.mjs'
+import { localTools } from '../bridge/local-tools.mjs'
+
+const phoneFiles = (run = async () => ({ result: '[]' })) => ({
+  status: async () => ({ root: '/storage/emulated/0', inbox: '/data/user/0/dev.jarvis.app/files/inbox', granted: true }),
+  readMemory: async () => ({ text: '' }),
+  run,
+})
+
+/** A transport that answers from a table and records what it was asked. */
+function scripted(routes) {
+  const asked = []
+  const http = async (request) => {
+    asked.push(request)
+    const route = Object.entries(routes).find(([prefix]) => request.url.startsWith(prefix))
+    if (!route) throw new Error(`unexpected request to ${request.url}`)
+    return typeof route[1] === 'function' ? route[1](request) : route[1]
+  }
+  return { http, asked }
+}
+
+const DDG = `<div class="result results_links"><h2 class="result__title">
+<a rel="nofollow" class="result__a" href="//duckduckgo.com/y.js?ad_domain=ads.example">Sponsored</a></h2></div>
+<div class="result results_links"><h2 class="result__title">
+<a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fmeteo.example%2Fparis%3Fa%3D1&amp;rut=abc">M&eacute;t&#233;o <b>Paris</b></a></h2>
+<a class="result__snippet" href="//duckduckgo.com/l/?uddg=x">Demain &agrave; <b>Paris</b> : 13&#xB0;C, averses.</a></div>
+<div class="result results_links"><a class="result__a" href="https://second.example/page">Second</a></div>`
+
+test('the phone and the PC offer the same tools, from the same definitions', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'jarvis-catalogue-'))
+  try {
+    const phone = await androidTools(phoneFiles(), { show: () => {}, http: async () => ({}) })
+    const pc = localTools({ allowWrites: true, cwd: dir, roots: [dir], show: () => {} })
+    const spec = (tools) => tools.map(({ name, description, parameters }) => ({ name, description, parameters }))
+    assert.deepEqual(spec(phone.tools), spec(pc))
+    assert.deepEqual(phone.tools.map((tool) => tool.name),
+      ['list_files', 'read_file', 'write_file', 'move_file', 'open', 'remember', 'forget', 'show', 'web_search', 'web_fetch'])
+    // The shell is the one capability only a computer has, and only on request.
+    const shell = localTools({ allowWrites: true, cwd: dir, roots: [dir], show: () => {}, shell: true })
+    assert.deepEqual(shell.map((tool) => tool.name).filter((name) => !phone.tools.some((tool) => tool.name === name)), ['run_command'])
+    assert.match(phone.system, /web_search/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a capability the device does not hand over is not offered', () => {
+  const names = deviceTools({ list: async () => [], read: async () => ({ text: '', total: 0 }), remember: async () => '', forget: async () => '' })
+    .map((tool) => tool.name)
+  assert.deepEqual(names, ['list_files', 'read_file', 'remember', 'forget'])
+})
+
+test('folders are filtered, sorted and paged by the catalogue, whatever the device', async () => {
+  const entries = [
+    { name: 'zeta.txt', dir: false, size: 3 }, { name: 'Photos', dir: true, size: 0 },
+    { name: 'alpha.PDF', dir: false, size: 10 }, { name: 'clip.mp4', dir: false, size: 99 },
+    ...Array.from({ length: 60 }, (_, i) => ({ name: `note-${String(i).padStart(2, '0')}.md`, dir: false, size: i })),
+  ]
+  const asked = []
+  const tools = deviceTools({
+    list: async (folder) => { asked.push(folder); return entries },
+    read: async (path, from, length) => ({ text: 'é'.repeat(5000).slice(from, from + length), total: 5000 }),
+    remember: async () => '', forget: async () => '',
+  }, { page: 600 })
+  const run = (name, args) => tools.find((tool) => tool.name === name).run(args)
+
+  const first = await run('list_files', { folder: '/sdcard' })
+  assert.match(first, /^alpha\.PDF \(10 bytes\)\nclip\.mp4 \(99 bytes\)\nnote-00\.md/)
+  assert.ok(first.length <= 600)
+  const next = Number(/(\d+) more entries; continue with from=(\d+)\]$/.exec(first)[2])
+  assert.match(await run('list_files', { folder: '/sdcard', from: next }), new RegExp(`^note-${String(next - 2).padStart(2, '0')}\\.md`))
+  assert.equal(await run('list_files', { folder: '/sdcard', kind: 'documents', contains: 'A' }),
+    'alpha.PDF (10 bytes)\nzeta.txt (3 bytes)\n[End of folder: 2 entries total]')
+  assert.equal(await run('list_files', { folder: '/sdcard', contains: 'photo' }), 'Photos/\n[End of folder: 1 entries total]')
+  await assert.rejects(run('list_files', { folder: '/sdcard', kind: 'videos' }), /Unknown file kind/)
+  assert.deepEqual([...new Set(asked)], ['/sdcard'])
+
+  const page = await run('read_file', { path: '/sdcard/a.txt' })
+  assert.match(page, /^é{600}\n\[4400 more characters; read on with from=600\]$/)
+  assert.equal(await run('read_file', { path: '/sdcard/a.txt', from: 4900 }), 'é'.repeat(100))
+})
+
+test('on-device Gemma is given pages that still fit its context after a web search', async () => {
+  const { http } = scripted({ 'https://html.duckduckgo.com/': { status: 200, headers: {}, data: DDG.repeat(8) } })
+  const { tools, system } = await androidTools(phoneFiles(), { show: () => {}, http, context: LOCAL_CONTEXT_BYTES })
+  const specs = tools.map(({ name, description, parameters }) => ({ type: 'function', function: { name, description, parameters } }))
+  const found = await tools.find((tool) => tool.name === 'web_search').run({ query: 'météo Paris demain' })
+  assert.match(found, /^1\. Météo Paris\nhttps:\/\/meteo\.example\/paris\?a=1\nDemain à Paris : 13°C, averses\./)
+  assert.doesNotThrow(() => fitContext([
+    { role: 'system', content: system },
+    { role: 'user', content: 'Fais une recherche internet sur la météo de demain à Paris et dis-moi s’il faut un parapluie.' },
+    { role: 'assistant', content: '', tool_calls: [{ function: { name: 'web_search', arguments: { query: 'météo Paris demain' } } }] },
+    { role: 'tool', tool_name: 'web_search', content: found },
+  ], specs))
+})
+
+test('web_search reads DuckDuckGo, skips sponsored links and falls back to Exa', async () => {
+  const ddg = scripted({ 'https://html.duckduckgo.com/': { status: 200, headers: {}, data: DDG } })
+  const [search] = webTools(ddg.http)
+  assert.equal(await search.run({ query: 'météo Paris' }),
+    '1. Météo Paris\nhttps://meteo.example/paris?a=1\nDemain à Paris : 13°C, averses.\n2. Second\nhttps://second.example/page')
+  assert.equal(ddg.asked[0].url, 'https://html.duckduckgo.com/html/?q=m%C3%A9t%C3%A9o%20Paris')
+
+  const exa = scripted({
+    'https://html.duckduckgo.com/': { status: 202, headers: {}, data: '<html>anomaly</html>' },
+    'https://mcp.exa.ai/mcp': (request) => {
+      assert.equal(request.method, 'POST')
+      assert.equal(request.data.params.arguments.query, 'météo Paris')
+      return { status: 200, headers: { 'Content-Type': 'text/event-stream' },
+        data: `event: message\ndata: ${JSON.stringify({ result: { content: [{ type: 'text', text: 'Title: Météo\nURL: https://meteo.example' }] } })}\n\n` }
+    },
+  })
+  assert.equal(await webTools(exa.http)[0].run({ query: 'météo Paris' }), 'Title: Météo\nURL: https://meteo.example')
+
+  const down = scripted({ 'https://': () => { throw new Error('Unable to resolve host') } })
+  await assert.rejects(webTools(down.http)[0].run({ query: 'x' }), /returned nothing \(DuckDuckGo: Unable to resolve host ; Exa: Unable to resolve host\)/)
+  await assert.rejects(webTools(down.http)[0].run({ query: ' ' }), /words to search/)
+})
+
+test('web_fetch returns the words of a page, in pages, and refuses what is not text', async () => {
+  const body = `<!doctype html><html><head><title>Bulletin &amp; pr&eacute;visions</title><style>p{color:red}</style></head>
+<body><script>alert("no")</script><h1>Paris</h1><p>Averses l&#233;g&egrave;res.</p><p>${'mot '.repeat(400)}</p></body></html>`
+  const { http, asked } = scripted({
+    'https://meteo.example/old': { status: 301, headers: { Location: '/paris' }, data: '' },
+    'https://meteo.example/paris': { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' }, data: body },
+    'https://meteo.example/data': { status: 200, headers: { 'Content-Type': 'application/json' }, data: { temp: 13 } },
+    'https://meteo.example/file.pdf': { status: 200, headers: { 'Content-Type': 'application/pdf' }, data: '%PDF' },
+    'https://meteo.example/gone': { status: 404, headers: {}, data: 'no' },
+  })
+  const fetch = webTools(http, { limit: 700 })[1]
+  const first = await fetch.run({ url: 'https://meteo.example/old' })
+  assert.match(first, /^Bulletin & prévisions\nhttps:\/\/meteo\.example\/paris\nParis\nAverses légères\.\nmot mot/)
+  assert.doesNotMatch(first, /alert|color/)
+  assert.ok(first.length <= 700)
+  assert.deepEqual(asked.map((request) => request.url), ['https://meteo.example/old', 'https://meteo.example/paris'])
+  const from = Number(/continue with from=(\d+)\]$/.exec(first)[1])
+  assert.match(await fetch.run({ url: 'https://meteo.example/paris', from }), /^[mot ]+\n\[\d+ more characters; continue with from=\d+\]$/)
+
+  assert.equal(await fetch.run({ url: 'https://meteo.example/data' }), 'https://meteo.example/data\n{"temp":13}')
+  assert.match(await fetch.run({ url: 'https://meteo.example/file.pdf' }), /application\/pdf file/)
+  await assert.rejects(fetch.run({ url: 'https://meteo.example/gone' }), /answered 404/)
+})
+
+test('the web tools never reach a private address, directly or by redirect', async () => {
+  const { http, asked } = scripted({
+    'https://public.example/': { status: 302, headers: { location: 'http://192.168.1.1/admin' }, data: '' },
+  })
+  const fetch = webTools(http)[1]
+  for (const url of ['http://127.0.0.1:8787/health', 'http://192.168.1.1/', 'https://pc.tail1234.ts.net/file?path=C:/x',
+    'http://router/', 'http://[::1]/', 'http://nas.local/', 'file:///etc/passwd', 'not a url']) {
+    await assert.rejects(fetch.run({ url }), /blocked host|url required/, url)
+  }
+  await assert.rejects(fetch.run({ url: 'https://public.example/' }), /blocked host/)
+  assert.deepEqual(asked.map((request) => request.url), ['https://public.example/'])
+})
+
+test('a cancelled turn stops waiting for a transport that cannot be cancelled', async () => {
+  const controller = new AbortController()
+  const pending = webTools(() => new Promise(() => {}))[1].run({ url: 'https://slow.example/' }, { signal: controller.signal })
+  controller.abort()
+  await assert.rejects(pending, { name: 'AbortError' })
+})
+
+test('markup becomes plain words', () => {
+  assert.equal(htmlToText('<div>Un&nbsp;&laquo;&nbsp;test&nbsp;&raquo;<br>ligne <b>deux</b></div><!-- x --><p>&#128512; &unknown;</p>'),
+    'Un « test »\nligne deux\n😀 &unknown;')
+})

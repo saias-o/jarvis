@@ -60,28 +60,17 @@ class JarvisFilesPlugin : Plugin() {
                 val args = call.getObject("args") ?: JSObject()
                 val name = call.getString("name") ?: ""
                 android.util.Log.i("JarvisFiles", "Running $name on Android")
+                // Primitives only: filtering, paging and wording belong to the tool
+                // catalogue shared with the PC (shared/tools.mjs).
                 val result: String = when (name) {
                     "list_files" -> {
                         val folder = vet(args.optString("folder", shared.path))
                         require(folder.isDirectory) { "Folder unavailable; check storage permission" }
-                        val documents = setOf("pdf", "doc", "docx", "odt", "ods", "xls", "xlsx", "ppt", "pptx", "txt", "md", "rtf", "csv", "json", "xml", "html", "htm", "epub")
-                        val kind = args.optString("kind", "all")
-                        require(kind in setOf("all", "documents")) { "Unknown file kind" }
-                        val files = folder.listFiles().orEmpty().filter { it.name.contains(args.optString("contains"), true) }
-                            .filter { kind != "documents" || (it.isFile && it.extension.lowercase() in documents) }
-                            .filter { runCatching { vet(it.path) }.isSuccess }.sortedBy { it.name.lowercase() }
-                        val start = args.optInt("from", 0).coerceIn(0, files.size)
-                        val page = StringBuilder()
-                        var shown = 0
-                        for (file in files.drop(start).take(40)) {
-                            val line = file.name + if (file.isDirectory) "/" else " (${file.length()} bytes)"
-                            if (shown > 0 && page.length + line.length > 1600) break
-                            page.append(line).append('\n'); shown++
+                        val entries = org.json.JSONArray()
+                        folder.listFiles().orEmpty().filter { runCatching { vet(it.path) }.isSuccess }.forEach {
+                            entries.put(org.json.JSONObject().put("name", it.name).put("dir", it.isDirectory).put("size", it.length()))
                         }
-                        val next = start + shown
-                        if (next < files.size) page.append("[${files.size - next} more entries; continue with from=$next]")
-                        else page.append("[End of folder: ${files.size} entries total]")
-                        page.toString()
+                        entries.toString()
                     }
                     "read_file" -> {
                         val file = vet(args.optString("path"))
@@ -90,8 +79,8 @@ class JarvisFilesPlugin : Plugin() {
                         require(!bytes.take(4096).contains(0.toByte())) { "Binary file cannot be read as text" }
                         val text = bytes.toString(Charsets.UTF_8)
                         val from = args.optInt("from", 0).coerceIn(0, text.length)
-                        val end = (from + 1800).coerceAtMost(text.length)
-                        text.substring(from, end) + if (end < text.length) "\n[Read on with from=$end]" else ""
+                        val end = (from + args.optInt("length", 1600).coerceIn(1, 8000)).coerceAtMost(text.length)
+                        org.json.JSONObject().put("text", text.substring(from, end)).put("total", text.length).toString()
                     }
                     "write_file" -> {
                         val target = vet(args.optString("path"))
@@ -109,13 +98,16 @@ class JarvisFilesPlugin : Plugin() {
                         "Moved."
                     }
                     "open" -> {
-                        val target = vet(args.optString("target"))
-                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", target)
-                        val type = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(target.extension.lowercase()) ?: "*/*"
-                        withContext(Dispatchers.Main) {
-                            activity.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, type)
-                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-                        }; "Opened."
+                        val asked = args.optString("target").trim()
+                        val view = if (asked.startsWith("https://", true) || asked.startsWith("http://", true)) {
+                            Intent(Intent.ACTION_VIEW, Uri.parse(asked))
+                        } else {
+                            val target = vet(asked)
+                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", target)
+                            val type = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(target.extension.lowercase()) ?: "*/*"
+                            Intent(Intent.ACTION_VIEW).setDataAndType(uri, type).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        withContext(Dispatchers.Main) { activity.startActivity(view) }; "Opened."
                     }
                     "remember" -> {
                         val fact = args.optString("fact").replace(Regex("[\\r\\n]+"), " ").trim().take(500)

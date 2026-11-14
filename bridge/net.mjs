@@ -18,7 +18,10 @@
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { lookup as dnsLookup } from 'node:dns'
-import { isIP } from 'node:net'
+import { blockedAddress, proxyError, vetTarget } from '../shared/public-web.mjs'
+
+// One gate for the bridge and the phone: the rules live in shared/public-web.mjs.
+export { blockedAddress, proxyError, vetTarget }
 
 /** A redirect chain longer than this is a loop or a game, not a CDN. */
 export const MAX_REDIRECTS = 4
@@ -33,76 +36,6 @@ export const MAX_REDIRECTS = 4
 export const PROXY_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36' +
   ' (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-
-/**
- * Hostnames refused before a packet moves.
- *
- * `.local` is mDNS — every printer, NAS and Home Assistant box on the network
- * answers to it — and `.internal` / `.home.arpa` are the same idea by
- * convention. These never name anything on the public web, so a request for one
- * is either confused or hostile.
- */
-const BLOCKED_HOSTNAME = /(^|\.)(localhost|local|internal|intranet|home\.arpa)$/i
-
-/**
- * Is this *resolved address* one the bridge must not connect to?
- *
- * The list is the usual suspects plus the ones people forget: 169.254.169.254
- * is the cloud metadata endpoint, 100.64/10 is carrier-grade NAT (and Tailscale
- * lives there), 0.0.0.0/8 and the v4-mapped v6 forms are the classic ways of
- * writing "localhost" that a naive string check waves straight through.
- */
-export function blockedAddress(ip) {
-  let addr = String(ip ?? '').toLowerCase().split('%')[0]
-  // ::ffff:127.0.0.1 is loopback wearing a hat. Unwrap before judging.
-  //
-  // Worth knowing where this can and cannot fire. WHATWG URL parsing serialises
-  // an IPv4-mapped literal into hex — new URL('http://[::ffff:127.0.0.1]/')
-  // gives a hostname of [::ffff:7f00:1] — so a dotted-quad form never survives
-  // to reach this branch from a parsed URL. It is still load-bearing for the
-  // other caller: DNS answers arrive as strings in exactly this shape.
-  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(addr)
-  if (mapped) addr = mapped[1]
-
-  if (addr.includes('.')) {
-    const parts = addr.split('.').map(Number)
-    if (parts.length !== 4) return true
-    if (parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true
-    const [a, b] = parts
-    if (a === 0) return true // 0.0.0.0/8 — "this network", routes to localhost
-    if (a === 10) return true // 10/8
-    if (a === 127) return true // loopback
-    if (a === 169 && b === 254) return true // link-local AND cloud metadata
-    if (a === 172 && b >= 16 && b <= 31) return true // 172.16/12
-    if (a === 192 && b === 168) return true // 192.168/16
-    if (a === 192 && b === 0) return true // 192.0.0/24 protocol assignments
-    if (a === 100 && b >= 64 && b <= 127) return true // CGNAT / tailnets
-    if (a === 198 && (b === 18 || b === 19)) return true // benchmarking range
-    if (a >= 224) return true // multicast, reserved, broadcast
-    return false
-  }
-
-  // The hex forms the parser actually produces, including the mapped range that
-  // the dotted-quad unwrap above can never see.
-  if (addr === '::' || addr === '::1') return true
-  if (/^::ffff:/.test(addr)) {
-    const hex = addr.slice(7).split(':')
-    if (hex.length === 2) {
-      const high = parseInt(hex[0], 16)
-      const low = parseInt(hex[1], 16)
-      if (Number.isFinite(high) && Number.isFinite(low)) {
-        return blockedAddress(
-          [high >> 8, high & 0xff, low >> 8, low & 0xff].join('.'),
-        )
-      }
-    }
-    return true
-  }
-  if (/^f[cd]/.test(addr)) return true // fc00::/7 unique local
-  if (/^fe[89ab]/.test(addr)) return true // fe80::/10 link-local
-  if (/^ff/.test(addr)) return true // multicast
-  return false
-}
 
 /**
  * The DNS hook every outbound socket goes through.
@@ -135,45 +68,11 @@ export function guardedLookup(hostname, options, callback) {
   })
 }
 
-/** An error carrying the status we want the browser to see. */
-export function proxyError(status, message) {
-  const err = new Error(message)
-  err.status = status
-  return err
-}
-
-/**
- * Only absolute http(s) URLs, and only ones whose host isn't obviously local.
- * Returns a URL or throws a proxyError, so callers can treat parse failure and
- * policy failure the same way.
- */
-export function vetTarget(raw) {
-  let url
-  try {
-    url = new URL(String(raw ?? ''))
-  } catch {
-    throw proxyError(400, 'absolute http(s) url required')
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw proxyError(400, 'absolute http(s) url required')
-  }
-  if (!url.hostname) throw proxyError(400, 'absolute http(s) url required')
-  if (BLOCKED_HOSTNAME.test(url.hostname)) throw proxyError(403, 'blocked host')
-  // An IP literal never reaches DNS in any meaningful sense, so judge it here —
-  // this is what turns http://127.0.0.1:8787/health into a refusal before a
-  // socket is opened rather than after.
-  const literal = url.hostname.replace(/^\[|\]$/g, '')
-  if (isIP(literal) && blockedAddress(literal)) {
-    throw proxyError(403, 'blocked host')
-  }
-  return url
-}
-
 /** One hop. Resolves with the IncomingMessage once headers are in. */
-export function requestOnce(url, headers, timeoutMs) {
+export function requestOnce(url, headers, timeoutMs, { method = 'GET', body } = {}) {
   return new Promise((resolve, reject) => {
     const req = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
-      method: 'GET',
+      method,
       headers,
       // The SSRF gate. Everything else here is plumbing.
       lookup: guardedLookup,
@@ -203,7 +102,7 @@ export function requestOnce(url, headers, timeoutMs) {
             : proxyError(502, 'upstream unreachable'),
       )
     })
-    req.end()
+    req.end(body)
   })
 }
 
@@ -269,11 +168,17 @@ export async function fetchText(url, { maxBytes, timeoutMs, accept }) {
     throw proxyError(status === 404 ? 404 : 502, `upstream said ${status}`)
   }
 
+  const { text, bytes } = await readBody(res, maxBytes)
+  return { text, type, url: finalUrl.href, headers: res.headers, bytes }
+}
+
+/** A whole body as text in its own character set, refused past the cap. */
+async function readBody(res, maxBytes) {
   const chunks = []
-  let size = 0
+  let bytes = 0
   for await (const chunk of res) {
-    size += chunk.length
-    if (size > maxBytes) {
+    bytes += chunk.length
+    if (bytes > maxBytes) {
       res.destroy()
       throw proxyError(413, 'page too large')
     }
@@ -293,8 +198,29 @@ export async function fetchText(url, { maxBytes, timeoutMs, accept }) {
   } catch {
     text = raw.toString('utf8')
   }
+  return { text, bytes }
+}
 
-  return { text, type, url: finalUrl.href, headers: res.headers, bytes: size }
+/**
+ * The PC's transport for the shared web tools (shared/web-tools.mjs).
+ *
+ * Exactly one exchange: those tools follow redirects themselves, vetting each
+ * hop, and the DNS hook in requestOnce vets the address every hop resolves to.
+ */
+export async function webExchange({ url, method = 'GET', headers = {}, data }) {
+  const body = data === undefined ? undefined : JSON.stringify(data)
+  const res = await requestOnce(
+    vetTarget(url),
+    {
+      ...headers,
+      'accept-encoding': 'identity',
+      ...(body === undefined ? {} : { 'content-length': Buffer.byteLength(body) }),
+    },
+    20_000,
+    { method, body },
+  )
+  const { text } = await readBody(res, 4 * 1024 * 1024)
+  return { status: res.statusCode ?? 0, headers: res.headers, data: text }
 }
 
 /**

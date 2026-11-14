@@ -1,16 +1,14 @@
 /**
- * What the local brain can do, and what it is told.
+ * The PC's side of the device agent's tools, and what the local brain is told.
  *
- * A model this size is given few tools on purpose (see local.mjs): each one is
- * a schema it must read on every question and a choice it can get wrong. What
- * is here is what still matters with Claude out of reach — the files on this
- * machine, the long-term memory, and something to put on screen. The web, the
- * browser, the mailbox and every MCP server stay with Claude, and the prompt
- * says so, so the stand-in admits a limit instead of inventing an answer.
+ * The tools themselves — names, schemas, paging, the screen, the web — are the
+ * shared catalogue in shared/tools.mjs, the same code the phone runs. This file
+ * supplies only what is the PC's own: its disk, its memory file, its opener and
+ * its shell.
  *
- * The file tools obey the same rules as Claude's: the same folders, the same
- * refusal of anything that holds credentials (policy.mjs). Writing waits for
- * JARVIS_ALLOW_WRITES like everything else. A shell is a separate switch
+ * The file primitives obey the same rules as Claude's: the same folders, the
+ * same refusal of anything that holds credentials (policy.mjs). Writing waits
+ * for JARVIS_ALLOW_WRITES like everything else. A shell is a separate switch
  * again, JARVIS_LOCAL_SHELL=1: a small model writes a plausible command far
  * more readily than a correct one, and nothing downstream can tell which.
  */
@@ -19,20 +17,12 @@ import { execFile, spawn } from 'node:child_process'
 import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, extname, join, resolve as resolvePath } from 'node:path'
+import { deviceTools } from '../shared/tools.mjs'
 import { forgetFacts, readFacts, rememberFact } from './memory.mjs'
+import { webExchange } from './net.mjs'
 import { pathProblem } from './policy.mjs'
 
-const READ_WINDOW = 5000
 const MAX_READ_BYTES = 4 * 1024 * 1024
-
-const escapeHtml = (s) =>
-  String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
-
-const text = (properties, required = Object.keys(properties)) => ({
-  type: 'object',
-  properties,
-  required,
-})
 
 /**
  * @param {object} opts
@@ -52,190 +42,68 @@ export function localTools({ allowWrites = false, cwd, roots, shell = false, sho
     return resolvePath(cwd, expanded)
   }
 
-  const tools = [
-    {
-      name: 'list_files',
-      description:
-        'List what is in a folder: names, whether each is a folder, and file sizes. ' +
-        'Give `contains` to keep only names containing those letters.',
-      parameters: text(
-        {
-          folder: { type: 'string', description: 'Absolute path of the folder.' },
-          contains: { type: 'string', description: 'Optional: part of the name to look for.' },
-        },
-        ['folder'],
-      ),
-      async run({ folder, contains }) {
-        const dir = vet(folder)
-        const needle = String(contains ?? '').trim().toLowerCase()
-        const entries = (await readdir(dir, { withFileTypes: true }))
-          .filter((e) => !needle || e.name.toLowerCase().includes(needle))
-          .slice(0, 200)
-        if (!entries.length) return 'Nothing there.'
-        const lines = await Promise.all(
-          entries.map(async (e) => {
-            if (e.isDirectory()) return `${e.name}/`
-            try {
-              return `${e.name} (${(await stat(join(dir, e.name))).size} bytes)`
-            } catch {
-              return e.name
-            }
-          }),
-        )
-        return lines.join('\n')
-      },
+  const platform = {
+    async list(folder) {
+      const dir = vet(folder)
+      return Promise.all((await readdir(dir, { withFileTypes: true })).map(async (entry) => ({
+        name: entry.name,
+        dir: entry.isDirectory(),
+        size: entry.isDirectory() ? 0 : await stat(join(dir, entry.name)).then((info) => info.size, () => 0),
+      })))
     },
-    {
-      name: 'read_file',
-      description:
-        'Read a text file. Long files come back in parts: pass `from` (a character ' +
-        'position) to read on. Pictures that came with the question are already ' +
-        'visible to you; do not read them with this.',
-      parameters: text(
-        {
-          path: { type: 'string', description: 'Absolute path of the file.' },
-          from: { type: 'number', description: 'Optional: character position to start at.' },
-        },
-        ['path'],
-      ),
-      async run({ path, from }) {
-        const file = vet(path)
-        const info = await stat(file)
-        if (!info.isFile()) throw new Error('that is a folder, not a file')
-        if (info.size > MAX_READ_BYTES) throw new Error('the file is too large to read here')
-        const bytes = await readFile(file)
-        // A zero byte in the opening block is the cheap, reliable sign of a
-        // binary file — a PDF, an image, an archive.
-        if (bytes.subarray(0, 4096).includes(0)) {
-          return `This is a binary file (${extname(file) || 'no extension'}, ${info.size} bytes); its text cannot be read here.`
-        }
-        const all = bytes.toString('utf8')
-        const start = Math.max(0, Math.floor(Number(from) || 0))
-        const part = all.slice(start, start + READ_WINDOW)
-        const end = start + part.length
-        return end < all.length
-          ? `${part}\n[${all.length - end} more characters; read on with from=${end}]`
-          : part || '[the file is empty]'
-      },
+    async read(path, from, length) {
+      const file = vet(path)
+      const info = await stat(file)
+      if (!info.isFile()) throw new Error('that is a folder, not a file')
+      if (info.size > MAX_READ_BYTES) throw new Error('the file is too large to read here')
+      const bytes = await readFile(file)
+      // A zero byte in the opening block is the cheap, reliable sign of a
+      // binary file — a PDF, an image, an archive.
+      if (bytes.subarray(0, 4096).includes(0)) {
+        throw new Error(`this is a binary file (${extname(file) || 'no extension'}, ${info.size} bytes); its text cannot be read here`)
+      }
+      const all = bytes.toString('utf8')
+      return { text: all.slice(from, from + length), total: all.length }
     },
-    {
-      name: 'remember',
-      description:
-        'Keep one important fact about the user for future conversations: one short ' +
-        'sentence. Never passwords, codes or card numbers.',
-      parameters: text({ fact: { type: 'string', description: 'The fact.' } }),
-      run: async ({ fact }) => rememberFact(fact),
-    },
-    {
-      name: 'forget',
-      description: 'Remove remembered facts containing the given words.',
-      parameters: text({ match: { type: 'string', description: 'Words the facts contain.' } }),
-      run: async ({ match }) => forgetFacts(match),
-    },
-  ]
-
-  if (show) {
-    tools.push({
-      name: 'show',
-      description:
-        'Put text on the screen — a list, an excerpt, a figure — when it is better ' +
-        'read than heard. Say what it means; do not read it out.',
-      parameters: text({
-        title: { type: 'string', description: 'Two or three words.' },
-        text: { type: 'string', description: 'What to show, one item per line.' },
-      }),
-      async run({ title, text: body }) {
-        const lines = String(body ?? '')
-          .split(/\r?\n/)
-          .map((l) => l.trim())
-          .filter(Boolean)
-        if (!lines.length) throw new Error('there was nothing to show')
-        show({
-          id: `l${Date.now().toString(36)}`,
-          title: String(title ?? '').trim().slice(0, 60) || 'DISPLAY',
-          kind: 'markup',
-          html: lines.map((l) => `<p>${escapeHtml(l)}</p>`).join(''),
-          size: 'compact',
-          hold: 'turn',
-        })
-        return 'On screen.'
-      },
-    })
+    remember: async (fact) => rememberFact(fact),
+    forget: async (match) => forgetFacts(match),
+    show,
+    http: webExchange,
   }
 
   if (allowWrites) {
-    tools.push(
-      {
-        name: 'write_file',
-        description: 'Create a text file, or replace one, with the given content.',
-        parameters: text({
-          path: { type: 'string', description: 'Absolute path of the file.' },
-          content: { type: 'string', description: 'The whole content.' },
-        }),
-        async run({ path, content }) {
-          const file = vet(path)
-          await mkdir(dirname(file), { recursive: true })
-          await writeFile(file, String(content ?? ''))
-          return 'Written.'
-        },
+    Object.assign(platform, {
+      async write(path, content) {
+        const file = vet(path)
+        await mkdir(dirname(file), { recursive: true })
+        await writeFile(file, content)
       },
-      {
-        name: 'move_file',
-        description:
-          'Move or rename a file. `to` is the full new path, file name included.',
-        parameters: text({
-          from: { type: 'string', description: 'Absolute path of the file now.' },
-          to: { type: 'string', description: 'Absolute path it should have.' },
-        }),
-        async run({ from, to }) {
-          const source = vet(from)
-          const target = vet(to)
-          if (!(await stat(source)).isFile()) throw new Error('only single files can be moved')
-          try {
-            await stat(target)
-            throw new Error('a file with that name is already there')
-          } catch (err) {
-            if (err.code !== 'ENOENT') throw err
-          }
-          await mkdir(dirname(target), { recursive: true })
-          try {
-            await rename(source, target)
-          } catch (err) {
-            // Another drive: a rename cannot cross it, a copy can.
-            if (err.code !== 'EXDEV') throw err
-            await copyFile(source, target)
-            await rm(source)
-          }
-          return 'Moved.'
-        },
+      async move(from, to) {
+        const source = vet(from)
+        const target = vet(to)
+        if (!(await stat(source)).isFile()) throw new Error('only single files can be moved')
+        try {
+          await stat(target)
+          throw new Error('a file with that name is already there')
+        } catch (err) {
+          if (err.code !== 'ENOENT') throw err
+        }
+        await mkdir(dirname(target), { recursive: true })
+        try {
+          await rename(source, target)
+        } catch (err) {
+          // Another drive: a rename cannot cross it, a copy can.
+          if (err.code !== 'EXDEV') throw err
+          await copyFile(source, target)
+          await rm(source)
+        }
       },
-      {
-        name: 'open',
-        description:
-          'Open a file, a folder or a web address for the user, in its usual application.',
-        parameters: text({ target: { type: 'string', description: 'A path or an https address.' } }),
-        async run({ target }) {
-          const asked = String(target ?? '').trim()
-          if (!asked) throw new Error('nothing to open')
-          const what = /^https?:\/\//i.test(asked) ? asked : vet(asked)
-          await openTarget(what)
-          return 'Opened.'
-        },
-      },
-    )
-    if (shell) {
-      tools.push({
-        name: 'run_command',
-        description:
-          'Run one shell command on this computer and get its output. Only when no ' +
-          'other tool does the job.',
-        parameters: text({ command: { type: 'string', description: 'The command line.' } }),
-        run: ({ command }, { signal } = {}) => runCommand(String(command ?? ''), cwd, signal),
-      })
-    }
+      open: (target) => openTarget(/^https?:\/\//i.test(target) ? target : vet(target)),
+      ...(shell ? { shell: (command, { signal } = {}) => runCommand(command, cwd, signal) } : {}),
+    })
   }
 
-  return tools
+  return deviceTools(platform)
 }
 
 /**
@@ -302,7 +170,7 @@ export function localSystemPrompt({ language, roots = [], inbox, allowWrites = f
       : 'Answer in the language the user speaks to you in.',
     'You are JARVIS, a voice assistant. Everything you write is read aloud to one person.',
     'Answer in one or two short sentences of plain speech. No markdown, no lists, no emoji, no symbols. Write numbers and times the way they are said. Be dry, precise and calm; call the user "sir" ("monsieur" in French) now and then. Never apologise and never explain your tools.',
-    'You are the backup brain running on this computer, because the main one cannot be reached. You cannot search the web, browse, read mail or use online services right now; if asked for one of those, say in one sentence that it has to wait until the connection is back. Never invent a fact you would need to look up.',
+    'You are the backup brain running on this computer, because the main one cannot be reached. You can search the internet with web_search and read a page with web_fetch: use them for news and for any fact you would need to look up, and say so in one sentence if they fail. You cannot drive a browser, read mail or use other online services right now; if asked for one of those, say in one sentence that it has to wait until the main brain is back. Never invent a fact you would need to look up.',
     `It is ${now.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' })}.`,
     roots.length
       ? `Your file tools reach only these folders: ${roots.join(' ; ')}. Always give absolute paths.` +

@@ -4,10 +4,10 @@ import { remoteChat } from '../../shared/remote-chat.mjs'
 import { pcTools } from '../../shared/pc-agent.mjs'
 import { accessToken, bridgeFetch } from './bridgeAuth'
 import { BRIDGE_HTTP_URL } from '../config'
-import { boundedChat } from '../../shared/context-window.mjs'
+import { boundedChat, LOCAL_CONTEXT_BYTES } from '../../shared/context-window.mjs'
 import { JarvisFiles, JarvisLlm, JarvisModels } from './android'
 import { readDeviceSettings } from './deviceSettings'
-import { mediaUrl } from './mediaUrl'
+import { CapacitorHttp } from '@capacitor/core'
 import type { AskHandlers } from './anthropic'
 import { useStore } from '../store'
 
@@ -65,14 +65,17 @@ export async function ask(prompt: string, handlers: AskHandlers, files: string[]
     if (inference === 'device') await warm()
     controller.signal.throwIfAborted()
     const pcUrl = BRIDGE_HTTP_URL
-    const phone = await androidTools(JarvisFiles, (title, text, image) => {
-      if (image) {
-        if (inference !== 'pc') throw new Error('Connect the PC to show a PC image')
-        useStore.getState().pushBlade({ id: crypto.randomUUID(), kind: 'image', title: String(title).slice(0, 60), url: mediaUrl(image, pcUrl), size: 'full', hold: 'turn' })
-        return
-      }
-      const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
-      useStore.getState().pushBlade({ id: crypto.randomUUID(), kind: 'markup', title: String(title).slice(0, 60), html: `<p>${escape(text).replace(/\n/g, '<br>')}</p>`, size: 'compact', hold: 'turn' })
+    const phone = await androidTools(JarvisFiles, {
+      show: (blade) => {
+        // The viewer loads images through the PC bridge.
+        if (blade.kind === 'image' && inference !== 'pc') throw new Error('Connect the PC to show an image')
+        useStore.getState().pushBlade(blade)
+      },
+      // Native HTTP: the WebView's own fetch is bound by CORS. The web tools
+      // follow redirects themselves so that every hop is vetted.
+      http: (request) => CapacitorHttp.request({ ...request, responseType: 'text', disableRedirects: true, connectTimeout: 10_000, readTimeout: 20_000 }),
+      // On-device Gemma has a 4,096-token window; a PC model reads far more.
+      context: inference === 'pc' ? undefined : LOCAL_CONTEXT_BYTES,
     })
     // The endpoint executes the PC's existing file tools under its own policy.
     // Keep both sets in the same loop, so the LLM chooses the device and steps.

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { pcTools as serverTools } from '../bridge/pc-tools.mjs'
 import { pcTools } from '../shared/pc-agent.mjs'
 import { androidTools } from '../shared/android-agent.mjs'
-import { createInference } from '../bridge/inference.mjs'
+import { createInference, MAX_TOOLS } from '../bridge/inference.mjs'
 import { agentTurn } from '../shared/agent-loop.mjs'
 import { remoteChat } from '../shared/remote-chat.mjs'
 
@@ -62,8 +62,9 @@ test('Android agent transfers an attachment through existing upload, moves it on
       return result.json()
     },
   }
-  const phone = await androidTools(files, () => {})
+  const phone = await androidTools(files, { show: () => {}, http: async () => ({}) })
   const pc = await pcTools(fetch, url, files, () => 'paired-token')
+  assert.ok(phone.tools.length + pc.tools.length <= MAX_TOOLS, 'The combined Android tool manifest must fit inference validation')
   const steps = []
   let received
   const infer = createInference({ query: ({ prompt, options }) => {
@@ -138,7 +139,6 @@ test('Android retains the existing PC command capability when writes are enabled
   const output = await command.run({ command: process.platform === 'win32'
     ? "Write-Output 'pc-capability-restored'" : "printf 'pc-capability-restored'" })
   assert.match(output, /pc-capability-restored/)
-  assert.ok(pc.tools.length + 8 <= 16, 'The combined Android tool manifest must fit inference validation')
 })
 
 test('existing Android show tool displays PC images as well as text', async () => {
@@ -146,10 +146,10 @@ test('existing Android show tool displays PC images as well as text', async () =
   const phone = await androidTools({
     status: async () => ({ root: '/storage/emulated/0', inbox: '/phone/inbox', granted: true }),
     readMemory: async () => ({ text: '' }),
-  }, (title, text, image) => { shown = { title, text, image } })
+  }, { show: (blade) => { shown = blade } })
   const show = phone.tools.find((tool) => tool.name === 'show')
   assert.equal(await show.run({ title: 'Écran du PC', image: 'C:/workspace/screen.png' }), 'On screen.')
-  assert.deepEqual(shown, { title: 'Écran du PC', text: undefined, image: 'C:/workspace/screen.png' })
+  assert.deepEqual({ ...shown, id: '' }, { id: '', title: 'Écran du PC', hold: 'turn', kind: 'image', url: 'C:/workspace/screen.png', size: 'full' })
   await assert.rejects(show.run({ title: 'Empty' }), /text or an image/)
 })
 

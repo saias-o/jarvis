@@ -6,8 +6,11 @@ function excerpt(text, limit) {
   return text.slice(0, limit) + '\n[Earlier tool output shortened to fit the local model; do not repeat completed actions.]'
 }
 
+/** What on-device Gemma is given at most: prompt, schemas and conversation. */
+export const LOCAL_CONTEXT_BYTES = 6144
+
 /** Keep current tool results and the request; discard old conversation first. */
-export function fitContext(messages, tools, maxBytes = 6144) {
+export function fitContext(messages, tools, maxBytes = LOCAL_CONTEXT_BYTES) {
   const current = messages.findLastIndex((message) => message.role === 'user')
   const system = messages.filter((message) => message.role === 'system')
   const earlier = messages.slice(system.length, current)
@@ -36,7 +39,7 @@ export function contextOverflow(error) {
 
 /** A rejected input can be compacted; streamed output must never be replayed. */
 export async function* boundedChat(chat, messages, tools, signal) {
-  const budgets = [6144, 4608, 3584]
+  const budgets = [LOCAL_CONTEXT_BYTES, 4608, 3584]
   for (let attempt = 0; attempt < budgets.length; attempt++) {
     signal?.throwIfAborted()
     const fitted = fitContext(messages, tools, budgets[attempt])

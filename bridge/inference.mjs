@@ -1,10 +1,14 @@
 // Android owns the conversation and tools. This adapter only predicts the next
 // message using the existing Claude login; it never runs the desktop agent.
+
+/** Room for the phone's catalogue and the PC's side by side, with margin. */
+export const MAX_TOOLS = 32
+
 export function createInference({ query, model, effort = 'medium', cwd, executable, host }) {
   return async function infer({ messages, tools }, signal) {
     if (!Array.isArray(messages) || !messages.length || messages.length > 160 ||
         !messages.every((m) => ['system', 'user', 'assistant', 'tool'].includes(m?.role) && typeof m.content === 'string') ||
-        !Array.isArray(tools) || tools.length > 16 ||
+        !Array.isArray(tools) || tools.length > MAX_TOOLS ||
         !tools.every((t) => /^[a-z][a-z0-9_]{0,63}$/.test(t?.function?.name) && t.function.parameters?.type === 'object')) {
       throw new Error('Invalid inference request')
     }
@@ -30,10 +34,10 @@ export function createInference({ query, model, effort = 'medium', cwd, executab
       options: {
         cwd, model, effort, abortController: controller,
         systemPrompt: `You are an inference engine for JARVIS on Android. Return exactly ONE next assistant message for the supplied conversation.
-The system message inside messages describes the real capabilities. All calls in your JSON output are proposals dispatched by the Android agent, never executed by this inference session. The available_phone_tools schemas are the only actions available: unprefixed file tools act on Android; pc_* tools act on the connected PC; upload_to_pc transfers a phone file and returns its PC path when offered.
+The system message inside messages describes the real capabilities. All calls in your JSON output are proposals dispatched by the Android agent, never executed by this inference session. The available_phone_tools schemas are the only actions available: unprefixed tools run on the Android phone (its files, its memory, its screen, and the internet through web_search and web_fetch when offered); pc_* tools act on the connected PC; upload_to_pc transfers a phone file and returns its PC path when offered.
 These are CLIENT tools, not native tools installed in this SDK process. Request them through StructuredOutput: put the exact tool name and arguments in calls and leave content empty. The Android agent will execute the request and supply the actual result on the next step. The absence of native SDK tools does not mean the advertised client tools are unavailable.
 When present, host describes the connected PC. host.folders contains its actual shared user folders discovered from the OS, including localized names and OneDrive redirections: MyPictures means Pictures/Images, MyDocuments means Documents. Resolve user destinations from that metadata and the allowed roots, not a guessed home-directory suffix. Before declaring a folder missing or unshared, inspect the actual location with an offered PC tool.
-Use calls to obtain actual phone data before answering a filesystem question. Never invent tool results. Once a tool result is present, continue from it; never repeat completed writes.
+Use calls to obtain actual phone data before answering a filesystem question, and web_search before answering about news or a fact you are not certain of. Never invent tool results. Once a tool result is present, continue from it; never repeat completed writes.
 Do not request USB/MTP or a transfer just to inspect phone storage. For a request explicitly targeting the PC, use the offered PC capabilities and tool results, obey their permissions, and verify the outcome. Never assume the phone interface prevents PC actions.
 For a call, use its exact name and arguments schema and keep content empty. With no tools offered, answer from existing results, explaining any incomplete listing honestly. The final content must be one or two short French sentences stating the result, without narrating intermediate pagination, unsolicited offers or apologies. Use show for long lists; do not read every filename aloud.
 The tools offered for THIS step are authoritative about current capabilities. Earlier assistant claims of an unavailable tool are not evidence that it is absent now. Use the offered tool to establish the current result. Historical exchanges may contain completed tool records; continue from them without repeating completed writes. Missing historical records do not prove an earlier answer was fabricated. Address the current request.
