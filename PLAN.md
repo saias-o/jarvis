@@ -14,21 +14,42 @@ Dernière mise à jour : 2026-11-14.
 - A1 : Capacitor 8.6.2, projet `android/`, workflow de build et signature
   persistante ajoutés. Quatre secrets Android configurés dans le fork ; copie
   privée ignorée par Git dans `.android-signing/`.
-- A2–A5 : plugins Kotlin Gemma / modèle / voix / fichiers écrits et raccordés ;
-  boucle partagée extraite et tests Ollama conservés. À compiler sur Actions et
-  à valider sur téléphone : ne pas confondre code présent et fonctionnement
-  vérifié sur appareil.
+- A1–A3 : APK signé compilé par Actions et installé sur Mi 9T Pro (Android 14,
+  6 Go de RAM). Gemma téléchargé dans l'app ; deux réponses françaises réelles
+  vérifiées sur téléphone. Boucle partagée et tests Ollama conservés.
+- A4 : voix native raccordée ; micro autorisé. Premier essai : erreur Android 12
+  (français non pris en charge par le moteur hors ligne). Correctif de repli
+  automatique vers le moteur système dans `f170fa1`, compilé et installé
+  (APK versionCode 6). L’utilisateur a confirmé : « ça marche le vocal ».
+- A5 : fichiers et partage Android implémentés ; accès global au stockage et
+  appels d'outils de fichiers encore à valider sur appareil.
 - A6 : réglages du PC et du cerveau ; CORS, identité Tailscale obligatoire pour
   l'origine native et jeton de session HTTP/WebSocket. Tests de sécurité passent.
   Les médias inter-origines avec code activé restent à compléter ; le réglage
   choisi `JARVIS_REMOTE_CODE=off` fonctionne sans cookie inter-origine.
 - A7 : icônes et documentation `docs/android.md` ajoutées ; service de premier
   plan optionnel non implémenté. B et restes de phase 1 toujours en attente.
-- Vérification locale : 83 tests passent, 1 ignoré ; TypeScript et build Vite OK ;
+- Vérification locale : 90 tests passent, 1 ignoré ; TypeScript et build Vite OK ;
   seulement les deux avertissements de lint préexistants. Pas de JDK/SDK installé.
-- Toujours manquants : modèle/RAM du téléphone, test réel Gemma, installation de
-  l'APK et validation Tailscale sur les appareils. Le fork seul ne transfère pas
-  les changements non commités de ce dossier.
+- Tailscale PC rétabli en lançant son client Windows (le service seul restait
+  en NoState). JARVIS démarré avec accès distant, sans code et limité au compte
+  propriétaire. `/auth` réel avec origine APK : required=false, ok=true ; une
+  question depuis l'APK a réellement été traitée par le PC. Mode automatique
+  et adresse du PC enregistrés dans l'app.
+- Le processus PC de cette session est en lecture seule : le contrôle automatique
+  a refusé le lancement persistant avec `--writes`. `.env.local` conserve les
+  préférences utilisateur ; le processus a un override en lecture seule.
+- APK de test local : `artifacts/JARVIS-Android14.apk` (dossier ignoré par Git).
+  VersionCode 6 installée, avec correction du micro et sans champ de code superflu.
+- Régression réelle sur les téléchargements : résultat de fichiers trop long
+  (4189 tokens pour une fenêtre de 4096). Correctif : listes Android paginées,
+  lectures courtes, contexte borné et nouvelle tentative uniquement avant tout
+  jeton émis. Sept tests de contexte ajoutés ; APK corrigé à compiler/installer.
+- Restent : valider les outils de fichiers natifs et le service
+  de premier plan optionnel ; phase B non commencée. Pas d'Ollama réel sur PC1.
+- Correctif PC : Vite ignore désormais `artifacts/`, `android/` et les outils de
+  session, pour éviter EBUSY sur l'APK pendant une installation USB. Les secrets
+  de signature sont aussi refusés explicitement par le serveur de développement.
 
 
 ---

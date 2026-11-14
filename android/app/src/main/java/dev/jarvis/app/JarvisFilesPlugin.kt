@@ -63,9 +63,20 @@ class JarvisFilesPlugin : Plugin() {
                     "list_files" -> {
                         val folder = vet(args.optString("folder", shared.path))
                         require(folder.isDirectory) { "Folder unavailable; check storage permission" }
-                        folder.listFiles().orEmpty().filter { it.name.contains(args.optString("contains"), true) }
-                            .filter { runCatching { vet(it.path) }.isSuccess }.take(200)
-                            .joinToString("\n") { it.name + if (it.isDirectory) "/" else " (${it.length()} bytes)" }
+                        val files = folder.listFiles().orEmpty().filter { it.name.contains(args.optString("contains"), true) }
+                            .filter { runCatching { vet(it.path) }.isSuccess }.sortedBy { it.name.lowercase() }
+                        val start = args.optInt("from", 0).coerceIn(0, files.size)
+                        val page = StringBuilder()
+                        var shown = 0
+                        for (file in files.drop(start).take(40)) {
+                            val line = file.name + if (file.isDirectory) "/" else " (${file.length()} bytes)"
+                            if (shown > 0 && page.length + line.length > 1600) break
+                            page.append(line).append('\n'); shown++
+                        }
+                        val next = start + shown
+                        if (next < files.size) page.append("[${files.size - next} more entries; continue with from=$next]")
+                        else page.append("[End of folder: ${files.size} entries total]")
+                        page.toString()
                     }
                     "read_file" -> {
                         val file = vet(args.optString("path"))
@@ -74,7 +85,7 @@ class JarvisFilesPlugin : Plugin() {
                         require(!bytes.take(4096).contains(0.toByte())) { "Binary file cannot be read as text" }
                         val text = bytes.toString(Charsets.UTF_8)
                         val from = args.optInt("from", 0).coerceIn(0, text.length)
-                        val end = (from + 5000).coerceAtMost(text.length)
+                        val end = (from + 1800).coerceAtMost(text.length)
                         text.substring(from, end) + if (end < text.length) "\n[Read on with from=$end]" else ""
                     }
                     "write_file" -> {

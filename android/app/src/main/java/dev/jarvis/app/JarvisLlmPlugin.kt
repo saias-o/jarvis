@@ -102,7 +102,8 @@ class JarvisLlmPlugin : Plugin() {
                     initialMessages = (0 until messages.length() - 1).map { message(messages.getJSONObject(it)) },
                     tools = providers, automaticToolCalling = false,
                     samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.3),
-                    maxOutputToken = 1024,
+                    maxOutputToken = 768,
+                    thinkingConfig = ThinkingConfig(enableThinking = false),
                 )).use { chat ->
                     conversation = chat
                     chat.sendMessageAsync(message(messages.getJSONObject(messages.length() - 1))).collect { chunk ->
