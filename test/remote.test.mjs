@@ -143,13 +143,14 @@ test('serves the interface without a code, and nothing outside it', async () => 
 
 test('every endpoint is closed until the code has been given', async () => {
   assert.deepEqual(JSON.parse((await call('/auth')).text), { required: true, ok: false })
-  for (const path of ['/inference', '/health', '/file?path=/tmp/x.png', '/img?url=https://example.com/a.png', '/page?url=https://example.com']) {
+  for (const path of ['/pc-tools', '/inference', '/health', '/file?path=/tmp/x.png', '/img?url=https://example.com/a.png', '/page?url=https://example.com']) {
     assert.equal((await call(path)).status, 401, path)
   }
   assert.equal((await call('/tts', { method: 'POST', body: '{"text":"hi"}' })).status, 401)
   // Handing JARVIS a file writes to the computer's disk: not without the code.
   assert.equal((await call('/upload?name=x.txt', { method: 'POST', body: 'x' })).status, 401)
   assert.equal((await call('/inference', { method: 'POST', body: '{}' })).status, 401)
+  assert.equal((await call('/pc-tools', { method: 'POST', body: '{}' })).status, 401)
   assert.equal(await wsHandshake({ Host: NAME, Origin: `https://${NAME}` }), 401)
 })
 
@@ -235,6 +236,11 @@ test('the Android origin needs an owner identity, CORS and a bearer token', asyn
   const health = await call('/health', { headers: { ...app, authorization: `Bearer ${token}` } })
   assert.equal(health.status, 200)
   assert.equal(health.headers['access-control-allow-origin'], app.origin)
+  const pc = await call('/pc-tools', { headers: { ...app, authorization: `Bearer ${token}` } })
+  assert.equal(pc.status, 200)
+  assert.equal(pc.headers['access-control-allow-origin'], app.origin)
+  assert.ok(JSON.parse(pc.text).tools.some((tool) => tool.name === 'list_files'))
+  assert.equal((await call('/pc-tools', { headers: { origin: app.origin, authorization: `Bearer ${token}` } })).status, 403)
   assert.equal((await call('/health', { headers: { ...app, origin: 'https://attacker.example', authorization: `Bearer ${token}` } })).status, 403)
   assert.equal((await call('/health', { headers: { ...app, origin: 'https://jarvis.app.evil', authorization: `Bearer ${token}` } })).status, 403)
   assert.equal((await call('/health', { headers: { origin: app.origin, authorization: `Bearer ${token}` } })).status, 403)

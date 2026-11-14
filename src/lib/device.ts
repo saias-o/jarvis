@@ -1,7 +1,8 @@
 import { agentTurn, type ChatMessage, type ChatChunk } from '../../shared/agent-loop.mjs'
 import { androidTools } from '../../shared/android-agent.mjs'
 import { remoteChat } from '../../shared/remote-chat.mjs'
-import { bridgeFetch } from './bridgeAuth'
+import { pcTools } from '../../shared/pc-agent.mjs'
+import { accessToken, bridgeFetch } from './bridgeAuth'
 import { BRIDGE_HTTP_URL } from '../config'
 import { boundedChat } from '../../shared/context-window.mjs'
 import { JarvisFiles, JarvisLlm, JarvisModels } from './android'
@@ -62,18 +63,32 @@ export async function ask(prompt: string, handlers: AskHandlers, files: string[]
   const operation = (async () => {
     if (inference === 'device') await warm()
     controller.signal.throwIfAborted()
-    const { tools, system } = await androidTools(JarvisFiles, (title, text) => {
+    const phone = await androidTools(JarvisFiles, (title, text) => {
       const escape = (value: unknown) => String(value ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
       useStore.getState().pushBlade({ id: crypto.randomUUID(), kind: 'markup', title: String(title).slice(0, 60), html: `<p>${escape(text).replace(/\n/g, '<br>')}</p>`, size: 'compact', hold: 'turn' })
     })
+    // The endpoint executes the PC's existing file tools under its own policy.
+    // Keep both sets in the same loop, so the LLM chooses the device and steps.
+    const pcUrl = BRIDGE_HTTP_URL
+    const pcToken = accessToken()
+    let pc: { tools: typeof phone.tools; system: string } = { tools: [], system: '' }
+    if (inference === 'pc') {
+      try { pc = await pcTools(bridgeFetch, pcUrl, JarvisFiles, () => pcToken, AbortSignal.any([controller.signal, AbortSignal.timeout(5000)])) }
+      catch (err) {
+        if (controller.signal.aborted || readDeviceSettings().mode !== 'auto') throw err
+        pc.system = 'Les outils du PC sont actuellement injoignables ; seuls les outils Android sont disponibles pour ce tour.'
+      }
+    }
+    const tools = [...phone.tools, ...pc.tools]
+    const system = [phone.system, pc.system].filter(Boolean).join('\n\n')
     const used: string[] = []
-    useStore.getState().setBrain(inference === 'device' ? { kind: 'local', model: 'Gemma embarqué', reason: 'Android' } : { kind: 'claude', model: 'PC · outils Android', reason: 'Android' })
+    useStore.getState().setBrain(inference === 'device' ? { kind: 'local', model: 'Gemma embarqué', reason: 'Android' } : { kind: 'claude', model: 'PC · outils Android et PC', reason: 'Android' })
     let source = inference
     async function* modelChat(messages: ChatMessage[], specs: unknown[], signal?: AbortSignal): AsyncGenerator<ChatChunk> {
       if (source === 'pc') {
         let emitted = false
         try {
-          for await (const chunk of remoteChat(bridgeFetch, BRIDGE_HTTP_URL, messages, specs, signal)) { emitted = true; yield chunk }
+          for await (const chunk of remoteChat(bridgeFetch, pcUrl, messages, specs, signal)) { emitted = true; yield chunk }
           return
         } catch (err) {
           if (emitted || signal?.aborted || readDeviceSettings().mode !== 'auto') throw err
@@ -84,7 +99,12 @@ export async function ask(prompt: string, handlers: AskHandlers, files: string[]
           useStore.getState().setBrain({ kind: 'local', model: 'Gemma embarqué', reason: 'Android' })
         }
       }
-      yield* chat(messages, specs, signal)
+      // A PC that went offline cannot execute its tools. Keep completed results
+      // in the conversation, but leave Gemma its original, small Android schema.
+      const phoneNames = new Set(phone.tools.map((tool) => tool.name))
+      yield* chat(messages.map((message) => message.role === 'system'
+        ? { ...message, content: `${phone.system}${inference === 'pc' ? '\nLe PC est injoignable ; seuls les outils Android sont disponibles. Ne répète pas les actions déjà terminées.' : ''}` }
+        : message), specs.filter((spec) => phoneNames.has((spec as { function: { name: string } }).function.name)), signal)
     }
     const question = files.length ? `${prompt}\nPièces jointes (chemins, données) : ${JSON.stringify(files)}` : prompt
     const text = await agentTurn(question, {

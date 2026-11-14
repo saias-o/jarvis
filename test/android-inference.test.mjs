@@ -29,7 +29,7 @@ test('PC inference lists Android Download using the phone tools and retains phon
       if (request === 0) {
         assert.match(input.messages[0].content, /téléphone Android/)
         assert.match(input.messages.at(-1).content, /\/data\/user\/0/)
-        answer = { content: '', calls: [{ name: 'list_files', arguments: { folder: '/storage/emulated/0/Download' } }] }
+        answer = { content: 'Les fichiers sont déjà affichés.', calls: [{ name: 'list_files', arguments: { folder: '/storage/emulated/0/Download' } }] }
       } else if (request === 1) {
         assert.equal(input.messages.at(-1).role, 'tool')
         assert.match(input.messages.at(-1).content, /facture-telephone.pdf/)
@@ -47,7 +47,7 @@ test('PC inference lists Android Download using the phone tools and retains phon
   })
   assert.deepEqual(executed, [{ name: 'list_files', args: { folder: '/storage/emulated/0/Download' } }])
   assert.equal(shown.text, 'facture-telephone.pdf')
-  assert.match(text, /sur votre téléphone/)
+  assert.equal(text, 'Un document sur votre téléphone, affiché à l’écran.')
   assert.equal(step, 3)
 })
 

@@ -70,15 +70,23 @@ when signing secrets are missing rather than issuing a new key.
    the app's private `memory.md`. Writes are enabled for the phone tools.
 6. The clip imports small attachments (up to 16 MB) into the phone's private
    inbox. For larger files use Android's **Share → JARVIS** (up to 1 GB).
-   Attachments stay on the phone, including when a PC supplies inference.
+   Attachments stay on the phone until the agent uses `upload_to_pc` for a
+   requested transfer. This reuses the native streaming upload, keeps the phone
+   original, and returns the path of the received file on the PC.
    Requested text excerpts and tool results are sent to the model as context.
 
 All three brain modes use the same Android agent and phone tools. In PC mode,
 the app calls `/inference` over Tailscale; the PC uses its Claude login to return
 the next message or proposed phone tool calls. Android executes those calls and
-sends the results back for the next inference step. Windows tools, desktop MCP
-servers and account connectors are disabled on this endpoint. The desktop UI
-keeps its existing Windows agent. Update both the PC server and APK together.
+sends the results back for the next inference step. The inference session itself
+has no desktop tools, MCP servers or account connectors. The app also discovers
+the PC's file tools through authenticated `GET /pc-tools`, exposes them to the
+LLM as `pc_*`, and dispatches their calls through `POST /pc-tools`. These reuse
+the existing PC file tools and obey its write setting, allowed roots and
+credential restrictions. The LLM can inspect both devices, upload a phone file,
+move the received PC file to the requested folder and verify it, within the same
+loop. The desktop UI keeps its existing Windows agent. Update both the PC server
+and APK together.
 
 `Download`, `Documents` and `DCIM` refer to the phone's shared storage. The
 `list_files` tool supports a `documents` filter and pagination. File permission

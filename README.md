@@ -15,6 +15,31 @@ listens through the browser's own speech, and everything still works.
 
 ---
 
+## Objective and design principles
+
+**JARVIS's objective is to become the most capable AI agent in the world.**
+The LLM is the intelligence behind every capability: it understands the request,
+decides what to do, chooses tools and combines them to complete the task.
+Every feature must give the LLM new capabilities it can discover and use.
+Task-specific intelligence and workflows must never be hardcoded as substitutes
+for the LLM's reasoning. Code provides reliable tools, context, permissions and
+execution; the LLM decides how to use them.
+
+For example, when a user attaches a file from their phone and says **"put this
+file on my PC in sandr/Images"**, JARVIS should use the attachment's actual
+location, resolve the destination on the PC, transfer the file with the available
+tools and verify that it arrived. In bridge mode, an uploaded phone attachment
+is already in the PC's inbox. Using the phone interface must not make the agent
+assume it cannot act on the computer.
+
+Before declaring a task impossible, the LLM must inspect its available tools,
+context and permissions and attempt the authorized action when supported. If a
+real restriction blocks it, it must explain the specific missing permission,
+tool or access, and how to unblock it. A blanket "I can't" for an action its
+tools support is a capability failure to fix.
+
+---
+
 ## Requirements
 
 **In one line:** a Claude Code subscription, plus two free things every computer

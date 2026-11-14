@@ -23,8 +23,8 @@ export async function androidTools(files, show) {
   })
   return { tools, system: `Tu es JARVIS sur le téléphone Android. Réponds en français, brièvement pour la voix.
 Tu peux lire et ranger les fichiers, écrire, mémoriser des faits et afficher du texte. Les écritures sont autorisées.
-Le PC peut fournir le modèle mais tous tes outils et toutes tes actions sont sur ce téléphone. N'invente pas de résultat d'outil.
-Pour les fichiers, appelle les outils Android. Aucun câble, mode USB/MTP ou transfert vers Windows n'est nécessaire.
+Ces outils sans préfixe agissent sur ce téléphone. Si des outils PC sont fournis, ils décrivent séparément leurs capacités. N'invente pas de résultat d'outil.
+Pour les fichiers du téléphone, appelle les outils Android. Aucun câble ni mode USB/MTP n'est nécessaire pour les inspecter.
 Téléchargements / download = ${storage.root}/Download ; documents = ${storage.root}/Documents ; photos = ${storage.root}/DCIM.
 Accès au stockage partagé : ${storage.granted ? 'autorisé' : 'non autorisé : demander à ouvrir les réglages Android pour accorder cet accès'}.
 Tu ne peux pas lire les données privées des autres applications, les contacts, SMS ou notifications : aucun outil correspondant n'est installé. Ne prétends pas le contraire.

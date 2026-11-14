@@ -18,6 +18,7 @@
 import { WebSocketServer } from 'ws'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { createInference } from './inference.mjs'
+import { pcTools } from './pc-tools.mjs'
 import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
@@ -926,7 +927,7 @@ function corsFor(req) {
 const http = await import('node:http')
 
 /** The endpoints below; on the remote port, each one needs the access cookie. */
-const API_PATHS = new Set(['/inference', '/health', '/file', '/img', '/media', '/pdf', '/page', '/tts', '/stt', '/upload'])
+const API_PATHS = new Set(['/pc-tools', '/inference', '/health', '/file', '/img', '/media', '/pdf', '/page', '/tts', '/stt', '/upload'])
 
 /**
  * Everything the remote port decides before a request reaches a handler:
@@ -997,6 +998,7 @@ async function remoteGate(req, res) {
 }
 
 const inferAndroid = createInference({ query, model: MODEL, effort: EFFORT, cwd: WORKSPACE, executable: process.env.JARVIS_CLAUDE_EXECUTABLE })
+const androidPcTools = pcTools({ allowWrites: ALLOW_WRITES, cwd: WORKSPACE, roots: TOOL_ROOTS })
 let inferenceRequests = 0
 
 const handleRequest = async (req, res, viaRemote = false) => {
@@ -1023,6 +1025,37 @@ const handleRequest = async (req, res, viaRemote = false) => {
     return res.end()
   }
 
+  if (req.url === '/pc-tools') {
+    const json = (status, value) => {
+      res.writeHead(status, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(value))
+    }
+    if (req.method === 'GET') return json(200, androidPcTools.manifest)
+    if (req.method !== 'POST') return json(405, { error: 'GET or POST required' })
+    const controller = new AbortController()
+    const disconnected = () => { if (!res.writableEnded) controller.abort() }
+    res.on('close', disconnected)
+    try {
+      const chunks = []
+      let bytes = 0
+      for await (const chunk of req) {
+        bytes += chunk.length
+        if (bytes > 256 * 1024) return json(413, { error: 'PC tool request too large' })
+        chunks.push(chunk)
+      }
+      let input
+      try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { return json(400, { error: 'Invalid JSON' }) }
+      if (!input || typeof input !== 'object') return json(400, { error: 'Invalid PC tool request' })
+      const result = await androidPcTools.run(input, controller.signal)
+      if (!res.destroyed) return json(200, { result })
+    } catch (err) {
+      if (!res.destroyed) return json(403, { error: err.message })
+    } finally {
+      res.off('close', disconnected)
+    }
+    return
+  }
+
   if (req.url === '/inference') {
     const json = (status, value) => {
       res.writeHead(status, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' })
@@ -1045,7 +1078,7 @@ const handleRequest = async (req, res, viaRemote = false) => {
       }
       let input
       try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { return json(400, { error: 'Invalid JSON' }) }
-      console.log('[jarvis] Android inference only (phone tools)')
+      console.log('[jarvis] Android inference (client-executed tools)')
       const result = await inferAndroid(input, controller.signal)
       if (!res.destroyed) return json(200, result)
     } catch (err) {
