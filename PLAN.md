@@ -36,9 +36,10 @@ Dernière mise à jour : 2026-11-14.
   propriétaire. `/auth` réel avec origine APK : required=false, ok=true ; une
   question depuis l'APK a réellement été traitée par le PC. Mode automatique
   et adresse du PC enregistrés dans l'app.
-- Le processus PC de cette session est en lecture seule : le contrôle automatique
-  a refusé le lancement persistant avec `--writes`. `.env.local` conserve les
-  préférences utilisateur ; le processus a un override en lecture seule.
+- Le processus PC est désormais lancé avec `--remote --writes` et
+  `JARVIS_ALLOW_WRITES=1`. L'utilisateur a explicitement autorisé le mode complet
+  après le refus initial du contrôle automatique. Vérifié : journal « writes
+  ENABLED », interface et cerveau HTTP 200, accès Tailscale sans code toujours actif.
 - APK de test local : `artifacts/JARVIS-Android14.apk` (dossier ignoré par Git).
   VersionCode 7 installée, avec corrections du micro et du contexte, sans champ de code superflu.
 - Régression réelle sur les téléchargements : résultat de fichiers trop long
