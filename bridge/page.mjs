@@ -261,7 +261,11 @@ function absolute(href, base) {
  * was furniture. Images are rewritten through /img so that even in reading mode
  * the browser never talks to the publisher.
  */
-function toReader(html, pageUrl, bridgeOrigin) {
+function toReader(html, pageUrl, bridgeOrigin, sign) {
+  // Through the bridge's /img, signed when the caller says the frame's own
+  // requests will arrive without credentials (see remote.mjs).
+  const viaBridge = (abs) =>
+    `${bridgeOrigin}/img?url=${encodeURIComponent(abs)}` + (sign ? `&amp;sig=${sign(abs)}` : '')
   const clean = stripDangerous(html)
   const body = articleBody(clean)
   const title = titleOf(html)
@@ -289,7 +293,7 @@ function toReader(html, pageUrl, bridgeOrigin) {
       // URI here is almost always one of those rather than a photograph.
       if (abs && /^https?:/i.test(abs)) {
         blocks.push(
-          `<img class="rd-img" loading="lazy" src="${bridgeOrigin}/img?url=${encodeURIComponent(abs)}" alt="">`,
+          `<img class="rd-img" loading="lazy" src="${viaBridge(abs)}" alt="">`,
         )
       }
       continue
@@ -313,7 +317,7 @@ function toReader(html, pageUrl, bridgeOrigin) {
 
   const leadImg =
     lead && /^https?:/i.test(lead)
-      ? `<img class="rd-lead" src="${bridgeOrigin}/img?url=${encodeURIComponent(lead)}" alt="">`
+      ? `<img class="rd-lead" src="${viaBridge(lead)}" alt="">`
       : ''
 
   const host = (() => {
@@ -390,8 +394,9 @@ function toLive(html, pageUrl) {
  * @param {string} url
  * @param {'reader'|'live'} mode
  * @param {string} bridgeOrigin  e.g. http://localhost:8787
+ * @param {(url: string) => string} [sign]  signs each image URL, when given
  */
-export async function renderPage(url, mode, bridgeOrigin) {
+export async function renderPage(url, mode, bridgeOrigin, sign) {
   const page = await fetchText(url, {
     maxBytes: MAX_PAGE_BYTES,
     timeoutMs: PAGE_TIMEOUT_MS,
@@ -405,7 +410,7 @@ export async function renderPage(url, mode, bridgeOrigin) {
   const shim = `<script nonce="${nonce}">${SCROLL_SHIM}</script>`
   const rendered = live
     ? toLive(page.text, page.url)
-    : toReader(page.text, page.url, bridgeOrigin)
+    : toReader(page.text, page.url, bridgeOrigin, sign)
   // Appended rather than injected into <head>: by this point every other script
   // is gone, so there is nothing for it to race, and </body> is somewhere every
   // one of these documents actually has.

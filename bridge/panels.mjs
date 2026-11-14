@@ -236,6 +236,12 @@ Choosing what to open:
   gallery — several pictures at once. This is the answer to an image search.
   video   — a direct .mp4/.webm file.
   embed   — a YouTube or Vimeo watch URL. It is turned into a player.
+  pdf     — a PDF document, shown page by page in a real PDF viewer. For a file
+            in the user's Google Drive, pass its Drive link (or its file id)
+            straight from the Drive search result — do NOT download it first,
+            the viewer fetches it itself. For a PDF on the web, pass its URL.
+            Use this whenever they ask to see, open or show a PDF; reading its
+            text yourself is for answering questions about it, not for showing it.
   markup  — your own composed HTML, in the same .hud-* system the display tool
             uses, when none of the above is the shape of the answer.
   camera  — the live view from the user's camera, on screen. Open it when they
@@ -260,14 +266,14 @@ const bladeSchema = {
     .string()
     .describe('Two to four words naming what this is, e.g. "REUTERS" or "MARK VII".'),
   kind: z
-    .enum(['article', 'image', 'gallery', 'video', 'embed', 'markup', 'camera'])
+    .enum(['article', 'image', 'gallery', 'video', 'embed', 'pdf', 'markup', 'camera'])
     .describe('What is being opened. See the tool description.'),
   url: z
     .string()
     .optional()
     .catch(undefined)
     .describe(
-      'The address, for article / image / video / embed. Use a URL that ' +
+      'The address, for article / image / video / embed / pdf. Use a URL that ' +
         'appeared verbatim in a tool result — never one you assembled yourself.',
     ),
   images: z
@@ -328,7 +334,7 @@ const NO_CAMERA_DESCRIPTION = BLADE_DESCRIPTION.replace(CAMERA_BLADE, '')
 const noCameraSchema = {
   ...bladeSchema,
   kind: z
-    .enum(['article', 'image', 'gallery', 'video', 'embed', 'markup'])
+    .enum(['article', 'image', 'gallery', 'video', 'embed', 'pdf', 'markup'])
     .describe('What is being opened. See the tool description.'),
 }
 
@@ -410,7 +416,7 @@ export function displayServer(emit, emitBlade, { camera = true } = {}) {
         if (kind === 'markup' && !String(args.html ?? '').trim()) {
           return refuse('Not opened: kind "markup" needs an `html` body.')
         }
-        if (['article', 'image', 'video', 'embed'].includes(kind) && !url) {
+        if (['article', 'image', 'video', 'embed', 'pdf'].includes(kind) && !url) {
           return refuse(`Not opened: kind "${kind}" needs a \`url\`.`)
         }
 
@@ -425,7 +431,7 @@ export function displayServer(emit, emitBlade, { camera = true } = {}) {
           // A reading column for anything meant to be read, a broad frame for
           // anything meant to be looked at. Getting this wrong is the difference
           // between an article you can follow and one in a letterbox.
-          size: args.size ?? (kind === 'article' ? 'tall' : 'wide'),
+          size: args.size ?? (kind === 'article' || kind === 'pdf' ? 'tall' : 'wide'),
           hold: args.hold ?? 'turn',
         }
         emitBlade(blade)

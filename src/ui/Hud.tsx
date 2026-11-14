@@ -3,6 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { useStore, accentFor, type Phase } from '../store'
 import { Suggestions } from './Suggestions'
 import { BladeSweep, Blades } from './Blades'
+import { IS_FRENCH } from '../config'
 import { Effects } from './Effects'
 import { Pointer } from './Pointer'
 import { GestureGuide } from './GestureGuide'
@@ -16,6 +17,28 @@ const statusText: Record<Phase, string> = {
   thinking: 'PROCESSING',
   tooling: 'ACCESSING SYSTEMS',
   speaking: 'RESPONDING',
+}
+
+/**
+ * Why the local model is answering, in the bridge's own codes (router.mjs).
+ * Anything unlisted is some other way of Claude being out of reach.
+ */
+function brainReason(reason: string): string {
+  const fr: Record<string, string> = {
+    offline: 'HORS LIGNE',
+    rate_limit: 'LIMITE D’USAGE ATTEINTE',
+    authentication_failed: 'CONNEXION CLAUDE EXPIRÉE',
+    billing_error: 'FACTURATION CLAUDE',
+    overloaded: 'CLAUDE SURCHARGÉ',
+  }
+  const en: Record<string, string> = {
+    offline: 'OFFLINE',
+    rate_limit: 'USAGE LIMIT REACHED',
+    authentication_failed: 'CLAUDE LOGIN EXPIRED',
+    billing_error: 'CLAUDE BILLING',
+    overloaded: 'CLAUDE OVERLOADED',
+  }
+  return (IS_FRENCH ? fr : en)[reason] ?? (IS_FRENCH ? 'CLAUDE INDISPONIBLE' : 'CLAUDE UNAVAILABLE')
 }
 
 function Corner({ at }: { at: 'tl' | 'tr' | 'bl' | 'br' }) {
@@ -153,9 +176,11 @@ export function Hud() {
   const activeTool = useStore((s) => s.activeTool)
   const connected = useStore((s) => s.connected)
   const error = useStore((s) => s.error)
+  const brain = useStore((s) => s.brain)
   const level = useStore((s) => s.level)
   const voice = useStore((s) => s.voice)
   const bootNote = useStore((s) => s.bootNote)
+  const voiceReady = useStore((s) => s.voiceReady)
   const gestures = useStore((s) => s.gestures)
   const looking = useStore((s) => s.looking)
   const ui = useStore((s) => s.ui)
@@ -202,7 +227,15 @@ export function Hud() {
                 the right thing to show during boot — as a general fallback a
                 note that never got cleared (a stuck 'voice 97%') sits over
                 LISTENING and PROCESSING for the rest of the session. */}
-            {phase === 'boot' && bootNote ? bootNote : statusText[phase]}
+            {phase === 'boot' && bootNote
+              ? bootNote
+              : phase === 'dormant' && !voiceReady
+                ? // Up and reachable by text, but a browser gives a page no
+                  // sound and no microphone until it has been touched once.
+                  IS_FRENCH
+                  ? 'PRÊT — TOUCHEZ L’ÉCRAN POUR LA VOIX'
+                  : 'READY — TOUCH THE SCREEN FOR VOICE'
+                : statusText[phase]}
           </span>
         </div>
       </header>
@@ -333,6 +366,16 @@ export function Hud() {
       {(gestures || looking) && (
         <div className="hands-live">
           {looking ? `LOOKING — ${looking.toUpperCase()}` : 'CAMERA ON · G TO STOP'}
+        </div>
+      )}
+      {/* Said for as long as it is true: an answer from the stand-in is a
+          smaller answer, and they should know which one they are getting. */}
+      {brain?.kind === 'local' && (
+        <div className="brain-local">
+          {IS_FRENCH ? 'CERVEAU LOCAL' : 'LOCAL BRAIN'} · {brain.model.toUpperCase()}
+          {brain.reason && brain.reason !== 'chosen' && (
+            <span className="brain-why">{brainReason(brain.reason)}</span>
+          )}
         </div>
       )}
       <GestureGuide live={gestures} />

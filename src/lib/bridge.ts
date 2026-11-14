@@ -1,6 +1,7 @@
+import { accessToken } from './bridgeAuth'
 import type { AskHandlers } from './anthropic'
-import type { Blade, Panel } from '../store'
-import { BRIDGE_WS_URL } from '../config'
+import type { Blade, BrainInfo, Panel } from '../store'
+import { BRIDGE_IS_HOST, BRIDGE_WS_URL } from '../config'
 
 /**
  * Client for the local bridge (see bridge/server.mjs).
@@ -34,6 +35,8 @@ type Frame = {
   mode?: string
   seconds?: number
   when?: string
+  brain?: string
+  model?: string
   servers?: Array<string | { name?: string }>
 }
 
@@ -100,6 +103,13 @@ export function watchUi(fn: (op: string, args: any) => void) {
   onUi = fn
 }
 
+/** Which brain is answering. The bridge says so whenever it changes: Claude
+ *  is the default and goes unannounced until the local model has stood in. */
+let onBrain: ((brain: BrainInfo) => void) | null = null
+export function watchBrain(fn: (brain: BrainInfo) => void) {
+  onBrain = fn
+}
+
 /**
  * Connection state, for the UI.
  *
@@ -142,6 +152,15 @@ let everConnected = false
 const RECONNECT_DELAYS = [500, 1000, 2000, 4000, 8000, 8000]
 let attempt = 0
 let reconnectTimer = 0
+
+export function disconnect(): void {
+  clearTimeout(reconnectTimer)
+  cancel()
+  const previous = socket
+  socket = null
+  previous?.close()
+  servers = []
+}
 
 function scheduleReconnect() {
   if (attempt >= RECONNECT_DELAYS.length) return
@@ -203,6 +222,8 @@ function dispatch(ws: WebSocket) {
           .then(reply)
           .catch((err) => reply({ error: String(err?.message ?? err) }))
       }
+    } else if (msg.type === 'brain' && (msg.brain === 'claude' || msg.brain === 'local')) {
+      onBrain?.({ kind: msg.brain, model: msg.model ?? '', reason: msg.reason ?? null })
     } else if (msg.type === 'ui' && msg.op) {
       // A `ui` frame with no args is normal — reset and clear take none — so an
       // absent args object is an empty one, not a reason to drop the command.
@@ -218,7 +239,8 @@ function connect(): Promise<WebSocket> {
   firstReady = deferred()
 
   connecting = new Promise<WebSocket>((resolve, reject) => {
-    const ws = new WebSocket(BRIDGE_WS_URL)
+    const token = accessToken()
+    const ws = new WebSocket(BRIDGE_WS_URL, token ? ['jarvis', `jarvis-access.${token}`] : undefined)
     let settled = false
 
     /**
@@ -265,10 +287,16 @@ function connect(): Promise<WebSocket> {
        */
       settle(
         new Error(
-          `Cannot reach the bridge at ${BRIDGE_WS_URL}. Either it is not ` +
-            'running (start it with `npm start`), or this page is on a port it ' +
-            `refuses — it accepts localhost:5173-5199 and 4173-4199, and this ` +
-            `page is on ${location.port || '80'}.`,
+          // From another device the page and the bridge are one address, so if
+          // the page loaded and the socket did not, the likeliest cause by far
+          // is a pairing that has lapsed — and a reload asks for the code.
+          BRIDGE_IS_HOST
+            ? 'Cannot reach JARVIS on the computer. Reload this page; if it ' +
+                'asks for the access code, enter it again.'
+            : `Cannot reach the bridge at ${BRIDGE_WS_URL}. Either it is not ` +
+              'running (start it with `npm start`), or this page is on a port it ' +
+              `refuses — it accepts localhost:5173-5199 and 4173-4199, and this ` +
+              `page is on ${location.port || '80'}.`,
         ),
       )
     }
@@ -316,6 +344,8 @@ let pending: { finish: (fallback?: string) => void } | null = null
 export async function ask(
   prompt: string,
   handlers: AskHandlers,
+  /** Bridge paths of files handed over since the last question. */
+  files: string[] = [],
 ): Promise<{ text: string; tools: string[] }> {
   /**
    * A new question supersedes the one in flight.
@@ -467,7 +497,7 @@ export async function ask(
     arm()
 
     try {
-      ws.send(JSON.stringify({ type: 'ask', text: prompt, id }))
+      ws.send(JSON.stringify({ type: 'ask', text: prompt, id, ...(files.length ? { files } : {}) }))
     } catch (err) {
       // The socket can go into CLOSING between connect() resolving and here.
       fail(err instanceof Error ? err : new Error(String(err)))

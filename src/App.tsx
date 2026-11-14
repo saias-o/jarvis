@@ -1,9 +1,16 @@
-import { useEffect, useRef } from 'react'
+import { AndroidSettings } from './ui/AndroidSettings'
+import { isAndroid, JarvisFiles } from './lib/android'
+import { useEffect, useRef, useState } from 'react'
 import { Scene } from './scene/Scene'
 import { Hud } from './ui/Hud'
 import { Boot } from './ui/Boot'
 import { Ignition } from './ui/Ignition'
 import { Diagnostics } from './ui/Diagnostics'
+import { AccessGate } from './ui/Access'
+import { Talk } from './ui/Talk'
+import { Ask } from './ui/Ask'
+import { Drop } from './ui/Drop'
+import { takeAttachments } from './lib/upload'
 import { useStore } from './store'
 import { startVoice, type Voice, type VoiceMode } from './lib/voice'
 import { createSpeaker, cycleVoice, currentVoiceName } from './lib/tts'
@@ -13,7 +20,9 @@ import * as hands from './lib/hands'
 import { listenForClap } from './lib/clap'
 import * as camera from './lib/camera'
 import * as kokoro from './lib/kokoro'
-import { TTS_ENGINE } from './config'
+import { TTS_ENGINE, IS_FRENCH, BRIDGE_IS_HOST, BOOT_SEQUENCE } from './config'
+import { checkAccess, type Access } from './lib/access'
+import { keepScreenOn } from './lib/wakelock'
 import { forTool, attention } from './lib/fillers'
 import {
   ask,
@@ -25,6 +34,7 @@ import {
   watchCapture,
   watchUi,
   watchConnection,
+  watchBrain,
   connectedLabels,
   usingBridge,
   type Msg,
@@ -83,6 +93,19 @@ export default function App() {
    */
   const turn = useRef(0)
   const booting = useRef(false)
+
+  /**
+   * Whether this device may talk to the bridge at all. Only ever in doubt when
+   * the bridge itself served the page — a phone, over the remote port — and
+   * until it is settled the ignition does nothing, since a power-up that
+   * cannot open the socket is just an error message with a boot animation.
+   */
+  const [access, setAccess] = useState<Access>(BRIDGE_IS_HOST ? 'checking' : 'open')
+  const accessNow = useRef(access)
+  accessNow.current = access
+  useEffect(() => {
+    if (BRIDGE_IS_HOST) void checkAccess().then(setAccess)
+  }, [])
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const voicePoll = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -134,7 +157,16 @@ export default function App() {
     s.clearPanels()
     s.clearBlades()
     s.setCaption('')
-    s.pushTurn({ id: newId(), role: 'user', text: said })
+    // Files handed over since the last question go with this one, whether it
+    // was typed or spoken. The transcript shows their names; the bridge tells
+    // the agent where they are.
+    const files = usingBridge ? takeAttachments() : []
+    const named = files.map((f) => f.name).join(', ')
+    s.pushTurn({
+      id: newId(),
+      role: 'user',
+      text: named ? (said ? `${said} [${named}]` : `[${named}]`) : said,
+    })
     s.setPhase('thinking')
 
     const spk = createSpeaker()
@@ -180,7 +212,7 @@ export default function App() {
             spk.say(forTool(name))
           }
         },
-      })
+      }, files.map((f) => f.path!))
 
       if (stale()) return
 
@@ -322,7 +354,7 @@ export default function App() {
     // The ignition button and the space bar can both land here, and the phase
     // only moves after the first await — so without this a double press boots
     // twice, arming two voice loops and two download polls.
-    if (booting.current) return
+    if (booting.current || accessNow.current !== 'open') return
     booting.current = true
 
     try {
@@ -346,18 +378,82 @@ export default function App() {
     }
   }
 
+  /**
+   * The microphone half of coming up: the level analyser and the voice loop.
+   * Both open an AudioContext, so both have to start from a user gesture.
+   */
+  const armVoice = async () => {
+    // The analyser is what makes the reactor pulse with your voice. It needs a
+    // getUserMedia stream; speech recognition does not, and gets its own. So a
+    // failure here costs the animation and nothing else — saying "voice input
+    // is unavailable" was both alarming and untrue.
+    try {
+      await startAnalyser()
+    } catch {
+      console.warn(
+        '[jarvis] no microphone stream — the reactor will not pulse with your ' +
+          'voice. Speech recognition is unaffected.',
+      )
+    }
+
+    // One voice loop, started once, running until the page closes.
+    voice.current = await startVoice({
+      mode,
+      onWake,
+      onSpeechStart,
+      onPartial,
+      onUtterance,
+      onError: onVoiceError,
+    })
+  }
+
+  /**
+   * Without the ignition screen there is no click to hang the audio on, so it
+   * waits for the first one the user makes for any reason — a tap on the talk
+   * button, a click into the text field, a key. Everything a browser refuses
+   * before a gesture starts here, in the gesture, exactly as it used to start
+   * in the INITIALISE click. Until then he is up, connected and answers what
+   * is typed; he just cannot hear or be heard.
+   *
+   * pointerup rather than pointerdown: for a finger, the press is not what a
+   * browser counts as the gesture — the release is.
+   */
+  const armOnFirstGesture = () => {
+    store.getState().setVoiceReady(false)
+    const arm = (e: Event) => {
+      // Escape is the one key a browser does not count as a gesture.
+      if (e instanceof KeyboardEvent && e.key === 'Escape') return
+      window.removeEventListener('pointerup', arm, true)
+      window.removeEventListener('keydown', arm, true)
+      void sfx.unlockAudio()
+      keepScreenOn()
+      music.enable()
+      music.startAmbient()
+      store.getState().setVoiceReady(true)
+      void armVoice().catch((err) =>
+        onVoiceError(err instanceof Error ? err.message : 'Voice input failed to start.'),
+      )
+    }
+    window.addEventListener('pointerup', arm, true)
+    window.addEventListener('keydown', arm, true)
+  }
+
   const ignite = async () => {
     const s = store.getState()
 
-    // Must happen inside the click handler — browsers won't start an
-    // AudioContext or speech synthesis without a user gesture.
-    await sfx.unlockAudio()
-    sfx.play('boot')
-    // The score. Must be started from inside this click handler for the same
-    // reason as the rest of the audio.
-    music.enable()
-    music.playBoot()
-    music.startAmbient()
+    if (BOOT_SEQUENCE) {
+      // Must happen inside the click handler — browsers won't start an
+      // AudioContext or speech synthesis without a user gesture.
+      await sfx.unlockAudio()
+      sfx.play('boot')
+      // Also has to be asked for from inside the gesture.
+      keepScreenOn()
+      // The score. Must be started from inside this click handler for the same
+      // reason as the rest of the audio.
+      music.enable()
+      music.playBoot()
+      music.startAmbient()
+    }
 
     s.setPhase('boot')
 
@@ -452,6 +548,7 @@ export default function App() {
     // In bridge mode the conversation lives in the agent session, which is tied
     // to the socket — so a drop silently wipes his memory while the transcript
     // on screen still shows it. Better to say so than to let him quietly forget.
+    watchBrain((brain) => store.getState().setBrain(brain))
     watchConnection((state) => {
       if (state === 'lost') {
         store.getState().setError('Bridge connection lost — reconnecting.')
@@ -490,23 +587,11 @@ export default function App() {
     // Long enough for the four-beat start-up sequence in Boot.tsx to play —
     // status bar, rings, suit schematic, reactor power-up — before the live
     // interface takes over. Kept a touch under the boot cue so the music is
-    // still rising as the reactor lands.
-    await new Promise((r) => setTimeout(r, 9200)) // boot sequence
+    // still rising as the reactor lands. Only when the sequence was asked for:
+    // by default nothing here waits on anything but the bridge.
+    if (BOOT_SEQUENCE) await new Promise((r) => setTimeout(r, 9200))
     await warming
     store.getState().setConnected(connectedLabels())
-
-    // The analyser is what makes the reactor pulse with your voice. It needs a
-    // getUserMedia stream; speech recognition does not, and gets its own. So a
-    // failure here costs the animation and nothing else — saying "voice input
-    // is unavailable" was both alarming and untrue.
-    try {
-      await startAnalyser()
-    } catch {
-      console.warn(
-        '[jarvis] no microphone stream — the reactor will not pulse with your ' +
-          'voice. Speech recognition is unaffected.',
-      )
-    }
 
     // Ask the bridge which speech engines exist before the loop starts, so the
     // first turn already uses ElevenLabs when a key is present and the browser
@@ -516,17 +601,53 @@ export default function App() {
     await probeCapabilities()
     store.getState().setVoice(currentVoiceName())
 
-    // One voice loop, started once, running until the page closes.
-    voice.current = await startVoice({
-      mode,
-      onWake,
-      onSpeechStart,
-      onPartial,
-      onUtterance,
-      onError: onVoiceError,
-    })
+    if (BOOT_SEQUENCE) await armVoice()
+    else armOnFirstGesture()
 
     store.getState().setPhase('dormant')
+  }
+
+  /**
+   * No ignition screen by default: come up as soon as the page may talk to the
+   * bridge — at once on the computer, and the moment the code is accepted on a
+   * device that still has to give one.
+   */
+  useEffect(() => {
+    if (!BOOT_SEQUENCE && access === 'open') void powerOn()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [access])
+
+  // -- the talk button ------------------------------------------------------
+
+  /** One press, read against the phase: wake, cut in, or stand down. */
+  const talk = () => {
+    const phase = store.getState().phase
+    if (phase === 'offline' || phase === 'boot') return
+    if (phase === 'thinking' || phase === 'tooling' || phase === 'speaking') {
+      onSpeechStart()
+      listen(AWAIT_SPEECH_MS)
+    } else if (phase === 'dormant') {
+      onWake('')
+    } else {
+      goDormant()
+    }
+  }
+
+  // -- typed instead of spoken ----------------------------------------------
+
+  /**
+   * A typed line is an utterance that skipped the microphone. It takes the
+   * same road from here: whatever he was doing stops, and this becomes the
+   * turn. From standby it also stands in for the wake word.
+   */
+  const sendText = (said: string) => {
+    const phase = store.getState().phase
+    if (phase === 'offline' || phase === 'boot') return
+    store.getState().setError(null)
+    // Silences a greeting or an answer in flight and abandons its turn; a
+    // no-op from standby, where there is nothing to cut off.
+    onSpeechStart()
+    void respond(said)
   }
 
   // -- clap to start --------------------------------------------------------
@@ -544,7 +665,9 @@ export default function App() {
    * about a feature nobody asked for would be worse than quietly doing without.
    */
   useEffect(() => {
-    if (phase !== 'offline') return
+    // The clap belongs to the ignition screen; without one there is nothing
+    // for it to start, and no reason to open the microphone on page load.
+    if (phase !== 'offline' || !BOOT_SEQUENCE) return
     let live: { stop: () => void } | null = null
     let gone = false
     void listenForClap(() => {
@@ -598,7 +721,12 @@ export default function App() {
         silence()
         const demo = createSpeaker()
         speaker.current = demo
-        demo.say(`Voice set to ${name.replace(/\(.*?\)/g, '').trim()}. At your service, sir.`)
+        const label = name.replace(/\(.*?\)/g, '').trim()
+        demo.say(
+          IS_FRENCH
+            ? `Voix réglée sur ${label}. À votre service.`
+            : `Voice set to ${label}. At your service, sir.`,
+        )
         void demo.end()
         return
       }
@@ -640,7 +768,11 @@ export default function App() {
         silence()
         const t = createSpeaker()
         speaker.current = t
-        t.say('Audio test. If you can hear this, speech output is working, sir.')
+        t.say(
+          IS_FRENCH
+            ? 'Test audio. Si vous m’entendez, la synthèse vocale fonctionne.'
+            : 'Audio test. If you can hear this, speech output is working, sir.',
+        )
         void t.end().then(() => {
           const d = (window as unknown as Record<string, Record<string, unknown>>).__tts
           console.info('[jarvis] audio test →', d)
@@ -697,13 +829,36 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    if (!isAndroid) return
+    let stopped = false
+    let reading = false
+    const receive = async () => {
+      if (reading || stopped) return
+      reading = true
+      try {
+        const shared = await JarvisFiles.takeShares()
+        if (!stopped) for (const file of shared.files) useStore.getState().addAttachment({ ...file, id: crypto.randomUUID(), state: 'ready' })
+      } catch (err) { console.warn('[jarvis] could not receive shared files', err) }
+      finally { reading = false }
+    }
+    void receive()
+    const timer = setInterval(() => { if (!document.hidden) void receive() }, 2000)
+    return () => { stopped = true; clearInterval(timer) }
+  }, [])
+
   return (
     <>
+      <AndroidSettings />
       <Scene />
       <Hud />
-      <Boot />
+      {BOOT_SEQUENCE && <Boot />}
       <Diagnostics />
-      <Ignition onStart={() => void powerOn()} />
+      <Ask onSend={sendText} />
+      <Drop />
+      <Talk onPress={talk} />
+      {BOOT_SEQUENCE && <Ignition onStart={() => void powerOn()} />}
+      {access === 'locked' && <AccessGate onOpen={() => setAccess('open')} />}
     </>
   )
 }

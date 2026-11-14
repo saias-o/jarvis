@@ -1,8 +1,13 @@
+import { isAndroid, JarvisFiles } from './android'
+import * as device from './device'
+import { readDeviceSettings } from './deviceSettings'
+import { BRIDGE_HTTP_URL, selectBridge } from '../config'
+import { accessToken, bridgeFetch } from './bridgeAuth'
 import { BACKEND } from '../config'
 import * as direct from './anthropic'
 import * as bridge from './bridge'
 import type { AskHandlers, Msg } from './anthropic'
-import type { Blade, Panel } from '../store'
+import type { Blade, BrainInfo, Panel } from '../store'
 
 export type { AskHandlers, Msg }
 export type { ConnectionState } from './bridge'
@@ -28,13 +33,54 @@ export async function ask(
   prompt: string,
   history: Msg[],
   handlers: AskHandlers,
+  /** Files handed over with this question. Bridge only: they live on its disk. */
+  files: string[] = [],
 ): Promise<{ text: string; tools: string[] }> {
+  if (isAndroid) {
+    const turn = ++androidTurn
+    await chooseAndroidBrain()
+    if (turn !== androidTurn) return { text: '', tools: [] }
+    if (androidBrain === 'device') return device.ask(prompt, handlers, files)
+    const remoteFiles = []
+    for (const path of files) {
+      const saved = await JarvisFiles.upload({ path, url: BRIDGE_HTTP_URL, token: accessToken() })
+      if (turn !== androidTurn) return { text: '', tools: [] }
+      remoteFiles.push(saved.path)
+    }
+    return bridge.ask(prompt, handlers, remoteFiles)
+  }
   return usingBridge
-    ? bridge.ask(prompt, handlers)
+    ? bridge.ask(prompt, handlers, files)
     : direct.ask([...history, { role: 'user', content: prompt }], handlers)
 }
 
+let androidTurn = 0
+let androidBrain: 'pc' | 'device' = 'device'
+
+export async function chooseAndroidBrain(): Promise<'pc' | 'device'> {
+  const settings = readDeviceSettings()
+  if (settings.mode === 'device') { androidBrain = 'device'; return androidBrain }
+  for (const pc of settings.pcs) {
+    if (pc !== BRIDGE_HTTP_URL) bridge.disconnect()
+    selectBridge(pc)
+    try {
+      const res = await bridgeFetch(`${pc}/health`, { signal: AbortSignal.timeout(2000) })
+      if (res.status === 401 && settings.mode === 'pc') throw new Error('Code d’accès requis : ouvrez Réglages Android.')
+      if (res.ok) { androidBrain = 'pc'; return androidBrain }
+    } catch (err) { if (settings.mode === 'pc' && err instanceof Error && /Code d’accès/.test(err.message)) throw err }
+  }
+  if (settings.mode === 'pc') throw new Error('PC injoignable. Vérifiez Tailscale et son adresse dans Réglages Android.')
+  androidBrain = 'device'
+  return androidBrain
+}
+
 export async function warm(): Promise<void> {
+  if (isAndroid) {
+    await chooseAndroidBrain()
+    // Let the interface open before a multi-gigabyte model is downloaded.
+    if (androidBrain === 'pc') await bridge.warmBridge()
+    return
+  }
   if (usingBridge) await bridge.warmBridge()
 }
 
@@ -54,6 +100,12 @@ export function watchPanels(fn: (panel: Panel) => void): void {
  *  has no channel for a server to volunteer anything mid-turn. */
 export function watchBlades(fn: (blade: Blade) => void): void {
   if (usingBridge) bridge.watchBlades(fn)
+}
+
+/** Which brain is answering — Claude, or the local model while Claude is out
+ *  of reach. Bridge only; the direct path has one brain and no fallback. */
+export function watchBrain(fn: (brain: BrainInfo) => void): void {
+  if (usingBridge) bridge.watchBrain(fn)
 }
 
 /**
@@ -91,6 +143,8 @@ export function watchCapture(
  * path by aborting the stream so the model stops generating and billing.
  */
 export function cancel(): void {
+  androidTurn++
+  if (isAndroid) device.cancel()
   if (usingBridge) bridge.cancel()
   else direct.cancel()
 }
@@ -108,7 +162,7 @@ export function interrupt(): void {
  * so there is nothing that can be down until you try it.
  */
 export function isConnected(): boolean {
-  return usingBridge ? bridge.isConnected() : true
+  return isAndroid && androidBrain === 'device' ? true : usingBridge ? bridge.isConnected() : true
 }
 
 /**

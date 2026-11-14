@@ -17,6 +17,8 @@
  *     so it goes at the end, and only sometimes.
  */
 
+import { IS_FRENCH } from '../config'
+
 /** Said as soon as the first tool fires, before any answer exists. */
 const WORKING = [
   'Working on it, sir.',
@@ -48,6 +50,36 @@ const ATTENTION = [
   'Awake, sir.',
 ]
 
+/** The same three pools in French, for VITE_VOICE_LANG=fr-*. Same grammar:
+ *  short, level, no eagerness, "monsieur" only at the end. */
+const WORKING_FR = [
+  'Je m’en occupe.',
+  'Compilation.',
+  'Recherche en cours.',
+  'J’interroge les archives.',
+  'Recoupement des données.',
+  'Je lance la requête.',
+  'Un instant.',
+  'C’est en cours.',
+]
+
+const ACKNOWLEDGE_FR = [
+  'À vos ordres.',
+  'Très bien.',
+  'Entendu.',
+  'C’est noté.',
+  'Considérez que c’est fait.',
+  'Certainement.',
+]
+
+const ATTENTION_FR = [
+  'Oui ?',
+  'Je vous écoute.',
+  'À votre service.',
+  'En attente.',
+  'Présent.',
+]
+
 /**
  * Avoids repeating the same phrase twice running, which is what makes canned
  * lines sound canned. Keeps one slot of history per pool.
@@ -63,9 +95,9 @@ function makePicker(pool: string[]) {
   }
 }
 
-export const working = makePicker(WORKING)
-export const acknowledge = makePicker(ACKNOWLEDGE)
-export const attention = makePicker(ATTENTION)
+export const working = makePicker(IS_FRENCH ? WORKING_FR : WORKING)
+export const acknowledge = makePicker(IS_FRENCH ? ACKNOWLEDGE_FR : ACKNOWLEDGE)
+export const attention = makePicker(IS_FRENCH ? ATTENTION_FR : ATTENTION)
 
 /**
  * Naming the task is warmer than a generic acknowledgement and shows the
@@ -188,6 +220,9 @@ function split(toolName: string): { server: string; tool: string } {
 
 /** A phrase suited to the tool that just fired. */
 export function forTool(toolName: string): string {
+  // The per-tool lines are English only; a neutral French line beats switching
+  // language mid-turn.
+  if (IS_FRENCH) return working()
   const { server, tool } = split(toolName)
   for (const r of pickers) {
     const hit =

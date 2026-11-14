@@ -9,6 +9,14 @@
       "runtimeArgs": ["start"],
       "port": 5180,
       "autoPort": false
+    },
+    {
+      "//": "Same app with write access: JARVIS can click and type in Chrome and run shell commands.",
+      "name": "jarvis-writes",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start", "--", "--writes"],
+      "port": 5180,
+      "autoPort": false
     }
   ]
 }

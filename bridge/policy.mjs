@@ -153,6 +153,10 @@ export function decideTool(name, allowWrites = false) {
     // indicator the user can see for as long as it is live.
     if (server === 'jarvis_eyes') return true
 
+    // His own memory file. It writes, but only one file of short facts the
+    // user can read and edit, so it is not held back behind allowWrites.
+    if (server === 'jarvis_memory') return true
+
     const tool = mcpToolOf(name)
     if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {
       return allowWrites

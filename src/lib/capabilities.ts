@@ -1,3 +1,5 @@
+import { isAndroid } from './android'
+import { bridgeFetch } from './bridgeAuth'
 import { BACKEND, BRIDGE_HTTP_URL, env } from '../config'
 
 /**
@@ -52,7 +54,7 @@ export async function probeCapabilities(): Promise<Capabilities> {
     return current
   }
   try {
-    const res = await fetch(`${BRIDGE_HTTP_URL}/health`, {
+    const res = await bridgeFetch(`${BRIDGE_HTTP_URL}/health`, {
       signal: AbortSignal.timeout(3000),
     })
     if (res.ok) {
@@ -74,5 +76,5 @@ export function engineLabel(): string {
   if (c.tts) return 'ElevenLabs voice'
   // env.elevenKey is only meaningful in direct mode; harmless to mention.
   if (env.elevenKey && BACKEND !== 'bridge') return 'ElevenLabs (direct)'
-  return 'browser speech'
+  return isAndroid ? 'Android speech' : 'browser speech'
 }

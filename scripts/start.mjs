@@ -8,6 +8,10 @@
  *
  * Pass --writes to allow JARVIS to take real actions (drive the phone, the
  * browser, send things): `npm start -- --writes`.
+ *
+ * Pass --remote to make the same JARVIS reachable from your phone as well
+ * (`npm run remote`). See scripts/remote.mjs for what that does and does not
+ * expose.
  */
 
 import { spawn } from 'node:child_process'
@@ -43,6 +47,13 @@ function vendorWasm() {
     console.warn(`  could not vendor the hand-tracking runtime: ${err.message}`)
   }
 }
+
+/**
+ * Bridge settings (JARVIS_MODEL, JARVIS_EFFORT …) can live in .env.local next
+ * to the frontend's, instead of being set in the shell before every start.
+ * Anything already in the environment wins, so a one-off override still works.
+ */
+if (existsSync('.env.local')) process.loadEnvFile('.env.local')
 
 const writes = process.argv.includes('--writes')
 
@@ -113,6 +124,56 @@ if (port) {
 
 vendorWasm()
 
+/**
+ * Remote access. Everything that can fail does so here, before either half
+ * has started, so a missing Tailscale is one clear message rather than a
+ * JARVIS that runs fine and cannot be reached.
+ */
+let remoteBanner = ''
+if (process.argv.includes('--remote-off')) {
+  const { unpublish } = await import('./remote.mjs')
+  console.log(unpublish() ? '  remote access is off.' : '  nothing to turn off (is Tailscale running?).')
+  process.exit(0)
+}
+if (process.argv.includes('--remote')) {
+  const remote = await import('./remote.mjs')
+  const { loadSecrets, prettyCode } = await import('../bridge/remote.mjs')
+  const stop = (why) => {
+    console.error(`\n  Remote access could not start.\n    ${why}\n`)
+    process.exit(1)
+  }
+
+  const net = remote.findTailnet()
+  if (net.problem) stop(net.problem)
+  if (!remote.buildFace().ok) stop('The interface failed to build — see the errors above.')
+  const published = remote.publish()
+  if (!published.ok) stop(published.problem.replace(/\n/g, '\n    '))
+
+  bridgeEnv.JARVIS_REMOTE_PORT = String(remote.REMOTE_PORT)
+  bridgeEnv.JARVIS_REMOTE_HOSTS = net.name
+  // Only requests the tailnet attributes to this machine's own account.
+  bridgeEnv.JARVIS_REMOTE_USERS = process.env.JARVIS_REMOTE_USERS ?? net.login
+
+  // Killed with the rest on the way out; it also leaves on its own if this
+  // process dies without getting the chance.
+  if (!process.argv.includes('--allow-sleep')) {
+    const awake = remote.keepAwake()
+    if (awake) children.push(awake)
+  }
+
+  // JARVIS_REMOTE_CODE=off: the Tailscale account is the only key, so there is
+  // no code to print — and none is created.
+  const noCode = ['off', '0', 'false', 'no'].includes(
+    (process.env.JARVIS_REMOTE_CODE ?? '').trim().toLowerCase(),
+  )
+  remoteBanner =
+    `\n  On your phone, with Tailscale switched on:  https://${net.name}\n` +
+    (noCode
+      ? '  No access code: any device signed in to your Tailscale account gets in.\n'
+      : `  Access code, asked once per device:         ${prettyCode(loadSecrets().code)}\n`) +
+    '  This computer is kept awake while JARVIS runs (--allow-sleep to opt out).\n'
+}
+
 console.log('\nJ.A.R.V.I.S. starting — the brain and the face.\n')
 run('bridge', 'node', ['bridge/server.mjs'], '36', bridgeEnv)
 // npm is a shell script on most systems; call the vite binary directly so we do
@@ -121,5 +182,6 @@ run('face', process.execPath, ['node_modules/vite/bin/vite.js'], '35', {})
 
 console.log(
   '\nWhen it says the dev server is ready, open the URL it prints in Chrome,\n' +
-    'click INITIALISE, and say "Hey Jarvis". Ctrl-C stops everything.\n',
+    'click once, and say "Hey Jarvis" or type to him. Ctrl-C stops everything.\n' +
+    remoteBanner,
 )

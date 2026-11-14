@@ -1,3 +1,6 @@
+import { isAndroid } from './lib/android'
+import { readDeviceSettings } from './lib/deviceSettings'
+
 /**
  * JARVIS configuration.
  *
@@ -71,8 +74,39 @@ export const BACKEND: 'bridge' | 'direct' = choice(
  * `wss://` maps to `https://` on its own, which is why this is a prefix swap
  * rather than a hardcoded scheme.
  */
-export const BRIDGE_WS_URL = str(import.meta.env.VITE_BRIDGE_URL) ?? 'ws://localhost:8787'
-export const BRIDGE_HTTP_URL = BRIDGE_WS_URL.replace(/^ws/, 'http')
+const LOCAL_BRIDGE = 'ws://localhost:8787'
+
+/**
+ * Same origin, when the bridge is what served this page.
+ *
+ * That is the remote case — a phone opening JARVIS over the tailnet — and there
+ * the address cannot be written down at build time: it is whatever name the
+ * phone used to get here. So the built page asks its own origin, and only the
+ * two arrangements where the face is served by something else keep the fixed
+ * default: the Vite dev server, and `vite preview` on its 4173-4199 ports.
+ */
+function sameOriginBridge(): string | null {
+  if (isAndroid || import.meta.env.DEV || typeof window === 'undefined') return null
+  const { protocol, hostname, port, host } = window.location
+  const local = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
+  const p = Number(port)
+  if (local && p >= 4173 && p <= 4199) return null
+  return `${protocol === 'https:' ? 'wss' : 'ws'}://${host}`
+}
+
+const SAME_ORIGIN = str(import.meta.env.VITE_BRIDGE_URL) ? null : sameOriginBridge()
+
+/** True when this page was served by the bridge itself — the remote port. */
+export const BRIDGE_IS_HOST = SAME_ORIGIN !== null
+
+export let BRIDGE_WS_URL = (isAndroid ? readDeviceSettings().pcs[0]?.replace(/^http/, 'ws') : undefined)
+  ?? str(import.meta.env.VITE_BRIDGE_URL) ?? SAME_ORIGIN ?? LOCAL_BRIDGE
+export let BRIDGE_HTTP_URL = BRIDGE_WS_URL.replace(/^ws/, 'http')
+
+export function selectBridge(httpUrl: string): void {
+  BRIDGE_HTTP_URL = httpUrl
+  BRIDGE_WS_URL = httpUrl.replace(/^http/, 'ws')
+}
 
 /**
  * Speech output engine.
@@ -85,6 +119,24 @@ export const BRIDGE_HTTP_URL = BRIDGE_WS_URL.replace(/^ws/, 'http')
  *   round trip plus generation, which is the difference between a conversation
  *   and a walkie-talkie. Turn it on when you want the voice more than the pace.
  */
+/**
+ * The cinematic start: an INITIALISE screen to click, then the nine-second
+ * boot sequence with its score before the interface is live.
+ *
+ * false (default) — no gate and no sequence. The interface is up and connected
+ *   the moment the page loads, and the text field works at once. Sound and the
+ *   microphone still need one touch, click or key from the user before a
+ *   browser will allow them, so they switch on with the first one — wherever
+ *   it lands.
+ *
+ * true — the full opening, for a demo or a recording.
+ */
+export const BOOT_SEQUENCE = flag(
+  'VITE_BOOT_SEQUENCE',
+  import.meta.env.VITE_BOOT_SEQUENCE,
+  false,
+)
+
 export const USE_ELEVENLABS = flag(
   'VITE_USE_ELEVENLABS',
   import.meta.env.VITE_USE_ELEVENLABS,
@@ -127,6 +179,19 @@ export const KOKORO_VOICE = choice(
   ['bm_george', 'bm_fable', 'bm_lewis', 'bm_daniel'] as const,
   'bm_george',
 )
+
+/**
+ * The language JARVIS hears and speaks, as a BCP 47 tag: the browser's speech
+ * recognition listens in it, the system voice is picked from it, and the canned
+ * lines follow it. Claude answers in whatever language it is spoken to.
+ *   en-GB — the character as written (default)
+ *   fr-FR — French; any other tag works for recognition and voice choice, with
+ *           the canned lines falling back to English
+ */
+export const VOICE_LANG = str(import.meta.env.VITE_VOICE_LANG) ?? 'en-GB'
+
+/** True when VOICE_LANG is French (fr-FR, fr-CA, fr-BE …). */
+export const IS_FRENCH = /^fr\b/i.test(VOICE_LANG)
 
 export const env = {
   anthropicKey: str(import.meta.env.VITE_ANTHROPIC_API_KEY) ?? '',

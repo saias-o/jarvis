@@ -49,7 +49,7 @@ npm install
 npm start          # runs the brain and the face together
 ```
 
-Then open the URL it prints (http://localhost:5173) in **Chrome**, click **INITIALISE**, and say **“Hey Jarvis”**.
+Then open the URL it prints (http://localhost:5173) in **Chrome**, click anywhere once so the browser allows sound and the microphone, and say **“Hey Jarvis”** — or type in the field at the bottom.
 
 Prefer two terminals? Run them separately instead:
 
@@ -75,7 +75,7 @@ Then open the app in a **real Chrome or Edge window**:
 open http://localhost:5173
 ```
 
-Click **INITIALISE**, allow the microphone when asked, and say **"Hey Jarvis"**.
+Click anywhere once, allow the microphone when asked, and say **"Hey Jarvis"**.
 
 > It has to be a real browser window. Embedded preview panes block the
 > microphone, so JARVIS will look perfectly alive and simply never respond.
@@ -201,15 +201,115 @@ chose.
 |---|---|
 | **"Hey Jarvis"** | Wake him |
 | **Space** | Talk without the wake word |
+| The text field | Write to him instead of speaking; Enter sends |
 | Just speak | Interrupt him mid-sentence (barge-in) |
 | **V** | Cycle the browser voice |
 | **Escape** | Stand down |
 | **D** | Live diagnostics panel |
 | **T** | One-line audio self-test |
 
+On a touch screen there is a talk button at the bottom instead of the space
+bar: press to wake him, press while he is answering to cut in, press while he is
+listening to stand him down.
+
 ---
 
+## Giving JARVIS a file
+
+Drop a file anywhere on the window, paste one, or press the clip beside the
+text field (on a phone it opens the system's picker). The file is uploaded to
+the bridge, stored in its inbox (`~/.jarvis/workspace/inbox`, one folder per
+day) and waits above the field until the next thing you say or type — then it
+goes with that question. *"Summarise this"*, *"what is the total on this
+invoice"*, or, with writes enabled, *"put it in my Documents folder"*.
+
+The bytes never enter the conversation: the agent is told where the file is
+and reads it with its own tools, so a long PDF costs nothing until you ask
+about it. From a phone over the remote port the file lands on the computer,
+which is where JARVIS works. The inbox is not emptied for you.
+
+---
+
+## When Claude is unavailable
+
+JARVIS can keep a second, small brain on the machine and switch to it when
+Claude cannot answer — no network, a usage limit reached, a login that has
+lapsed, the service down. It is optional: without it nothing changes.
+
+1. Install [Ollama](https://ollama.com) and pull the model:
+   `ollama pull gemma4:e2b` (about 7 GB; it runs on a CPU, slowly).
+2. Start JARVIS as usual. The bridge prints
+   `[jarvis] local model gemma4:e2b ready — takes over when Claude cannot answer`.
+
+From then on a question Claude cannot take is answered by the local model
+instead, before anything has been said, so you ask once and hear one answer.
+The interface shows `LOCAL BRAIN` and why for as long as it lasts, and Claude
+is tried again by itself a little later. The two brains share the conversation
+— each is told what the other answered — and the same long-term memory.
+
+The stand-in is honest about being smaller. It has the files on this machine
+(the same folders, under the same rules, as Claude's file tools), the memory,
+and the display; it has no web, no browser, no mailbox and no MCP servers, and
+says so when asked for one. `JARVIS_LOCAL_MODEL` names a larger model on a
+machine that can carry it, `JARVIS_LOCAL_URL` can point at another computer's
+Ollama, and `JARVIS_BRAIN=local` keeps everything on the machine.
+
+---
+
+## On your phone
+
+`npm run remote` starts JARVIS exactly as `npm start` does and also makes that
+same JARVIS reachable from your phone — same memory, same tools, same computer
+behind it — from anywhere, over [Tailscale](https://tailscale.com), a private
+network between your own devices. Nothing is opened to the internet.
+
+1. Install Tailscale on the computer and on the phone, and sign in to the same
+   account on both. In the Tailscale admin console, turn on MagicDNS and HTTPS
+   certificates (a phone's browser will not give a page the microphone without
+   HTTPS).
+2. Run `npm run remote` (or `npm run remote:writes` to let JARVIS act, not only
+   look). It prints the address to open and an access code.
+3. On the phone, with Tailscale switched on, open that address, enter the code
+   once, and use the browser's "Add to Home Screen" to keep it as an app.
+
+Would rather not have a code at all — say, because you will be away from the
+computer that shows it? Put `JARVIS_REMOTE_CODE=off` in `.env.local`. JARVIS
+then lets in any device signed in to your own Tailscale account and asks it for
+nothing.
+
+What it does: builds the interface when the source has changed, starts the
+bridge with a second, loopback-only port that serves it, points
+`tailscale serve` at that port, and keeps the computer awake for as long as it
+runs (`--allow-sleep` opts out). `npm run remote:off` takes the address down
+again, and `npm run remote:autostart` starts all of this at Windows sign-in
+(`-- --off` undoes it).
+
+The computer has to be on: the phone is a second face, and the brain stays
+where your files, your browser and your Claude login are. The page only listens
+while it is on screen, so on a phone use the talk button rather than the wake
+word. The camera JARVIS sees through is the phone's; the browser he drives is
+the computer's.
+
+---
+
+## Android APK
+
+The native Android app wraps this interface with Capacitor. It can use a PC
+through Tailscale, Gemma locally through LiteRT-LM, or select the PC when it is
+reachable and the phone otherwise. Android speech and shared-storage file tools
+are native; a model is imported or downloaded once in **Réglages Android**.
+
+See [the Android setup and verification guide](docs/android.md) for the fork,
+GitHub Actions build, persistent signing secrets and phone installation. Native
+code must pass the remote Gradle build and a real-device check before it can be
+considered working. The PC-to-PC mesh in PLAN.md is still pending.
+
 ## The boot sequence
+
+Off by default: the interface is live about a second after the page loads, and
+sound and the microphone switch on with your first click, touch or key. Set
+`VITE_BOOT_SEQUENCE=true` in `.env.local` for the cinematic opening instead —
+an INITIALISE screen, then the sequence below.
 
 Power-up plays a four-beat Iron Man start-up (`src/ui/Boot.tsx`): an
 "INITIATING SYSTEM" status bar with a segmented progress bar and boot log; then
@@ -231,8 +331,22 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_BRIDGE_PORT` | `8787` | Port for the WebSocket + HTTP endpoints |
 | `JARVIS_BRIDGE_HOST` | `127.0.0.1` | Interface to listen on. Any other address puts the agent on your network |
 | `JARVIS_ALLOWED_HOSTS` | none | Extra hostnames the bridge answers to; a request for any other name gets a 403 |
+| `JARVIS_REMOTE_PORT` | off | Second, loopback-only port for another device: serves the built interface and requires the access code. `npm run remote` sets it to `8788` |
+| `JARVIS_REMOTE_HOSTS` | none | Names the remote port answers to, besides loopback — your machine's tailnet name. `npm run remote` fills it in |
+| `JARVIS_REMOTE_CODE` | on | `off` asks other devices for no code: being signed in to your Tailscale account is then the only key |
+| `JARVIS_REMOTE_ORIGINS` | none | Exact HTTPS app origins accepted by the remote port, e.g. `https://jarvis.app`; an allowed Tailscale identity is still required |
+| `JARVIS_REMOTE_USERS` | none | Tailscale logins a remote request must come from. `npm run remote` fills in this machine's own account |
+| `JARVIS_REMOTE_FILE` | `~/.jarvis/remote.json` | Where the access code and signing secret live. Delete it to sign every device out |
 | `JARVIS_MODEL` | `claude-opus-5` | Model to run |
 | `JARVIS_EFFORT` | `medium` | Reasoning effort |
+| `JARVIS_BRAIN` | `auto` | `auto` falls back to the local model when Claude cannot answer, `claude` never does, `local` uses only the local model |
+| `JARVIS_LOCAL_MODEL` | `gemma4:e2b` | The Ollama model that stands in for Claude |
+| `JARVIS_LOCAL_URL` | `http://127.0.0.1:11434` | Where Ollama listens; several addresses, comma separated, are tried in order |
+| `JARVIS_LOCAL_CTX` | `8192` | Context window given to the local model, in tokens |
+| `JARVIS_LOCAL_KEEP_ALIVE` | `30m` | How long Ollama keeps the model loaded after an answer |
+| `JARVIS_LOCAL_SHELL` | off | `1` gives the local model a shell too (with writes on) |
+| `JARVIS_INBOX` | `<workspace>/inbox` | Where files handed to JARVIS are stored |
+| `JARVIS_UPLOAD_MAX_MB` | `1024` | Largest file accepted |
 | `JARVIS_ALLOW_WRITES` | off | `1` allows effectful tools (see below) |
 | `JARVIS_MCP_SERVERS` | all configured | Comma-separated `~/.claude.json` servers to pass on; empty passes none |
 | `JARVIS_ACCOUNT_CONNECTORS` | off | `1` lets your claude.ai account's connectors join the session |
@@ -244,6 +358,7 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_KEEP_TRANSCRIPTS` | off | `1` keeps the SDK's session transcripts in `~/.claude/projects` |
 | `JARVIS_CLAUDE_EXECUTABLE` | bundled CLI | Run the agent through this executable instead, e.g. a sandbox wrapper that execs the real CLI |
 | `JARVIS_CHROME_PIPE` | none | WSL only: the Windows pipe name the browser relay connects to |
+| `JARVIS_LOG_TALK` | off | `1` prints each question and each finished answer in the bridge terminal (never on disk) |
 | `JARVIS_DEBUG` | off | `1` logs every agent message to the bridge terminal, answer text and tool calls included |
 | `JARVIS_VOICE_ID` | none | ElevenLabs voice id |
 | `ELEVENLABS_API_KEY` | none | Optional; enables the ElevenLabs voice + Scribe |
@@ -254,6 +369,7 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 |---|---|
 | `VITE_BACKEND` | `bridge` (default) or `direct` |
 | `VITE_BRIDGE_URL` | Where to reach the bridge |
+| `VITE_BOOT_SEQUENCE` | `true` brings back the INITIALISE screen and the nine-second boot sequence |
 | `VITE_TTS_ENGINE` | `system` or `kokoro` |
 | `VITE_KOKORO_VOICE` | Voice for the Kokoro engine |
 | `VITE_USE_ELEVENLABS` | Force the ElevenLabs voice on |
@@ -338,9 +454,12 @@ not forward it.
 ## Tests
 
 `npm test` runs the bridge's tests with Node's built-in runner. They cover the
-network binding, the tool policy, the MCP server allowlist and the WSL browser
-relay, which runs only under WSL. The network and allowlist tests start the
-bridge on a random loopback port, and none of the tests opens an agent session.
+network binding, the tool policy, the MCP server allowlist, the remote port and
+the WSL browser relay, which runs only under WSL. The network, allowlist and
+remote tests start the bridge on a random loopback port, and none of the tests
+opens a Claude session. The local brain, the fallback and file uploads are
+tested through the real bridge against a fake Ollama, so they need neither
+Ollama nor a network.
 
 ---
 
@@ -367,6 +486,22 @@ The bridge's defences live in `bridge/server.mjs` and `bridge/policy.mjs`:
   entirely, and `JARVIS_CLAUDE_EXECUTABLE` can run the agent inside a sandbox
   wrapper.
 - A strict CSP in `index.html`; model-authored panel HTML is sanitised.
+- An uploaded file is stored under a name reduced to a single safe path
+  component, inside the inbox, up to `JARVIS_UPLOAD_MAX_MB`. The line that
+  tells the agent about it is written by the bridge from paths it has checked,
+  so a page cannot pass off an arbitrary path as a dropped file.
+- The local model's file tools obey the same folder and credential rules as
+  Claude's, write only with `JARVIS_ALLOW_WRITES`, and get a shell only with
+  `JARVIS_LOCAL_SHELL=1` as well.
+- Remote access (`bridge/remote.mjs`) is off by default and never loosens the
+  rules above: it is a separate port, still on loopback, that accepts only its
+  own page's origin and refuses every endpoint and the WebSocket without the
+  access cookie. The cookie is `HttpOnly`, `Secure` and `SameSite=Strict`, and
+  five wrong codes lock the exchange for five minutes. Requests are also
+  checked against the Tailscale account `tailscale serve` attributes them to,
+  which is the only check left when `JARVIS_REMOTE_CODE=off`. With `--writes`, a
+  paired phone can do whatever JARVIS can do on the computer — pair only
+  devices you would hand your unlocked computer to.
 
 ---
 

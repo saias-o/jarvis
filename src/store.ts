@@ -39,7 +39,7 @@ export type Panel = {
 export type Blade = {
   id: string
   title: string
-  kind: 'article' | 'image' | 'gallery' | 'video' | 'embed' | 'markup' | 'camera'
+  kind: 'article' | 'image' | 'gallery' | 'video' | 'embed' | 'pdf' | 'markup' | 'camera'
   /** article / image / video / embed. */
   url?: string
   /** gallery. */
@@ -50,6 +50,27 @@ export type Blade = {
   mode?: 'reader' | 'live'
   size: 'compact' | 'tall' | 'wide' | 'full'
   hold: 'turn' | 'sticky'
+}
+
+/**
+ * A file handed to JARVIS — dropped, pasted or picked — waiting to go with the
+ * next thing said. `path` is where the bridge stored it, known once the upload
+ * has finished.
+ */
+export type Attachment = {
+  id: string
+  name: string
+  size: number
+  path?: string
+  state: 'sending' | 'ready' | 'failed'
+}
+
+/** Which brain is answering: Claude, or the local model standing in for it. */
+export type BrainInfo = {
+  kind: 'claude' | 'local'
+  model: string
+  /** Why the local model took over — 'offline', 'rate_limit', … — if it did. */
+  reason: string | null
 }
 
 export type Turn = {
@@ -230,6 +251,8 @@ type State = {
   looking: string | null
   /** Transient status line during boot, e.g. the voice model download. */
   bootNote: string
+  /** False while sound and the microphone still wait on a first touch. */
+  voiceReady: boolean
   /** Cards currently on the display, newest last. */
   panels: Panel[]
   /** Blades currently open, newest last — which is also front-most. */
@@ -240,11 +263,21 @@ type State = {
   expandedBlade: string | null
   /** JARVIS's control over his own appearance. UI_DEFAULTS == the stock look. */
   ui: UiState
+  /** Files waiting to go with the next question. */
+  attachments: Attachment[]
+  /** Null until the bridge says otherwise, which means Claude. */
+  brain: BrainInfo | null
+
+  addAttachment: (a: Attachment) => void
+  updateAttachment: (id: string, patch: Partial<Attachment>) => void
+  removeAttachment: (id: string) => void
+  setBrain: (b: BrainInfo | null) => void
 
   setVoice: (v: string) => void
   setGestures: (on: boolean) => void
   setLooking: (why: string | null) => void
   setBootNote: (n: string) => void
+  setVoiceReady: (ready: boolean) => void
   pushPanel: (p: Panel) => void
   clearPanels: () => void
   pushBlade: (b: Blade) => void
@@ -286,12 +319,25 @@ export const useStore = create<State>((set) => ({
   focusedBlade: null,
   expandedBlade: null,
   bootNote: '',
+  voiceReady: true,
   ui: defaultUi(),
+  attachments: [],
+  brain: null,
+
+  addAttachment: (a) => set((s) => ({ attachments: [...s.attachments, a] })),
+  updateAttachment: (id, patch) =>
+    set((s) => ({
+      attachments: s.attachments.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+    })),
+  removeAttachment: (id) =>
+    set((s) => ({ attachments: s.attachments.filter((a) => a.id !== id) })),
+  setBrain: (brain) => set({ brain }),
 
   setVoice: (voice) => set({ voice }),
   setGestures: (gestures) => set({ gestures }),
   setLooking: (looking) => set({ looking }),
   setBootNote: (bootNote) => set({ bootNote }),
+  setVoiceReady: (voiceReady) => set({ voiceReady }),
   // Three is as many as fits around the reactor without crowding it. Sticky
   // panels are exempt from the cull — the tool description promises they stay
   // until replaced, and a plain slice(-3) silently evicted them the moment a

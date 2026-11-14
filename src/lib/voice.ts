@@ -1,4 +1,7 @@
-import { BRIDGE_HTTP_URL } from '../config'
+import { isAndroid } from './android'
+import { startAndroidVoice } from './androidVoice'
+import { bridgeFetch } from './bridgeAuth'
+import { BRIDGE_HTTP_URL, VOICE_LANG } from '../config'
 import { getMic } from './audio'
 import { speakingNow, speakingSince } from './tts'
 import { startVad, type Vad } from './vad'
@@ -78,7 +81,7 @@ const WAKE_DEBOUNCE = 1500
  * indication why. Better a rare false wake than a name that does not answer.
  */
 const WAKE =
-  /\b(?:hey|hi|ok|okay|yo)?\s*(?:jarvis|jarvys|jervis|jarvis's|travis|jarviss|java's|jarv)\b(?!'s)/i
+  /\b(?:hey|hi|ok|okay|yo|hé|eh|et)?\s*(?:jarvis|jarvys|jervis|jarvis's|travis|jarviss|java's|jarv|djarvis|jarvi)\b(?!'s)/i
 
 /** Everything after the wake phrase, which is usually the actual command. */
 function afterWake(text: string): string {
@@ -387,6 +390,7 @@ if (typeof window !== 'undefined') {
  * rather than surfacing later as an unexplained deafness, whichever engine runs.
  */
 export async function startVoice(h: VoiceHandlers): Promise<Voice> {
+  if (isAndroid) return startAndroidVoice(h)
   try {
     await getMic()
   } catch (err) {
@@ -450,7 +454,7 @@ async function startElevenVoice(h: VoiceHandlers): Promise<Voice> {
     if (mode === 'deaf') return
     const t0 = performance.now()
     try {
-      const res = await fetch(`${BRIDGE_HTTP_URL}/stt`, {
+      const res = await bridgeFetch(`${BRIDGE_HTTP_URL}/stt`, {
         method: 'POST',
         headers: { 'content-type': blob.type || 'audio/webm' },
         body: blob,
@@ -760,7 +764,7 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     rec = new Ctor()
     rec.continuous = true
     rec.interimResults = true
-    rec.lang = 'en-GB'
+    rec.lang = VOICE_LANG
     rec.onstart = () => {
       running = true
       diag.running = true

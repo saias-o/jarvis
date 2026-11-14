@@ -1,5 +1,7 @@
 import DOMPurify from 'dompurify'
 import { BRIDGE_HTTP_URL } from '../config'
+import { DISK_PATH_SOURCE } from '../lib/diskPath'
+import { mediaUrl } from '../lib/mediaUrl'
 
 /**
  * The safety boundary for model-authored markup.
@@ -12,14 +14,6 @@ import { BRIDGE_HTTP_URL } from '../config'
  * The markup is treated as untrusted, and it genuinely is: it is written by a
  * model that has, moments earlier, been reading pages off the open web.
  */
-
-/**
- * Paths that are genuinely on this machine's disk, as opposed to app-relative
- * URLs that happen to start with a slash. `/vite.svg` is one of our own static
- * assets; `/Users/you/shot.png` is a screenshot JARVIS just took.
- */
-const DISK_PATH =
-  /^\/(Users|home|root|Volumes|Applications|System|Library|private|tmp|var|opt|mnt|media|srv|data)\//
 
 /**
  * Every media URL is rewritten to point at the bridge. Two destinations, for
@@ -45,16 +39,7 @@ function rewriteSrc(el: Element, attr: 'src' | 'poster', route: 'img' | 'media')
   const raw = el.getAttribute(attr) ?? ''
   if (!raw) return
 
-  const path = raw.replace(/^file:\/\//, '')
-  if (DISK_PATH.test(path)) {
-    el.setAttribute(attr, `${BRIDGE_HTTP_URL}/file?path=${encodeURIComponent(path)}`)
-    return
-  }
-
-  if (!/^https?:\/\//i.test(raw)) return
-  // Already ours. Proxying the proxy would ask the bridge to fetch itself.
-  if (raw.startsWith(`${BRIDGE_HTTP_URL}/`)) return
-  el.setAttribute(attr, `${BRIDGE_HTTP_URL}/${route}?url=${encodeURIComponent(raw)}`)
+  el.setAttribute(attr, mediaUrl(raw, BRIDGE_HTTP_URL, route))
 }
 
 function rewriteMedia(root: Element) {
@@ -255,7 +240,16 @@ export function sanitisePanelHtml(html: string): string {
       // allowlisted embed. Supplying ALLOWED_TAGS/ALLOWED_ATTR replaces
       // DOMPurify's defaults wholesale, so there is deliberately no FORBID_*
       // list here — one would read as defence in depth while doing nothing.
-      ALLOWED_URI_REGEXP: /^(?:data:(?:image|video|audio)\/|file:\/\/|https?:\/\/|\/)/i,
+      //
+      // The last alternative is a Windows drive path. To a URL parser `C:\…` is
+      // a one-letter scheme, so without it the src of every local image is
+      // dropped here, before rewriteMedia ever sees it. One letter, a colon and
+      // a slash cannot spell any scheme a browser acts on, and the rewriter
+      // replaces it with a bridge URL a few lines below.
+      ALLOWED_URI_REGEXP: new RegExp(
+        String.raw`^(?:data:(?:image|video|audio)\/|file:\/|https?:\/\/|\/|${DISK_PATH_SOURCE})`,
+        'i',
+      ),
     }),
     'text/html',
   )

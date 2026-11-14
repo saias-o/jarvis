@@ -1,10 +1,16 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { createPortal } from 'react-dom'
 import { useStore, type Blade } from '../store'
 import { BRIDGE_HTTP_URL } from '../config'
-import { sanitisePanelHtml } from './sanitise'
+import { mediaUrl } from '../lib/mediaUrl'
 import { frameSpan, peaceScroll, pinchCount } from '../lib/hands'
 import * as camera from '../lib/camera'
+import { useMobileLayout } from '../lib/useMobileLayout'
+import { adjacentBlade } from '../lib/imageViewport'
+import { ImageViewer } from './ImageViewer'
+import { MobileBlades } from './MobileBlades'
+import { MarkupView } from './MarkupView'
 
 /**
  * The blades.
@@ -36,27 +42,36 @@ import * as camera from '../lib/camera'
 
 /* ------------------------------------------------------------------ sources */
 
-/**
- * Paths that are genuinely on this machine's disk, as opposed to app-relative
- * URLs that happen to start with a slash. Mirrors the test in sanitise.ts and
- * Orbits.tsx — the list of root directories is the sort of thing that should be
- * changed in each place deliberately.
- */
-const DISK_PATH =
-  /^\/(Users|home|root|Volumes|Applications|System|Library|private|tmp|var|opt|mnt|media|srv|data)\//
-
 /** Route a source through the bridge, which is the only origin that can
  *  actually fetch it — and the only one the page CSP will load from. */
 function viaBridge(raw: string, route: 'img' | 'media'): string {
+  return mediaUrl(raw, BRIDGE_HTTP_URL, route)
+}
+
+/**
+ * Where a PDF blade points. A Google Drive file goes to Drive's own viewer,
+ * which reads it with the user's Google sign-in in this browser — nothing is
+ * downloaded through the agent. Anything else on the web is fetched by the
+ * bridge and shown by Chrome's built-in PDF viewer.
+ */
+function pdfUrl(raw: string): string | null {
   const src = String(raw ?? '').trim()
-  if (!src) return ''
-  const path = src.replace(/^file:\/\//, '')
-  if (DISK_PATH.test(path)) {
-    return `${BRIDGE_HTTP_URL}/file?path=${encodeURIComponent(path)}`
+  // A bare Drive file id, as the search results give it.
+  if (/^[\w-]{20,}$/.test(src)) return `https://drive.google.com/file/d/${src}/preview`
+  let url: URL
+  try {
+    url = new URL(src)
+  } catch {
+    return null
   }
-  if (!/^https?:\/\//i.test(src)) return src
-  if (src.startsWith(`${BRIDGE_HTTP_URL}/`)) return src
-  return `${BRIDGE_HTTP_URL}/${route}?url=${encodeURIComponent(src)}`
+  const host = url.hostname.toLowerCase()
+  if (host === 'drive.google.com' || host === 'docs.google.com') {
+    const id =
+      /\/d\/([\w-]{20,})/.exec(url.pathname)?.[1] ?? url.searchParams.get('id') ?? ''
+    return /^[\w-]{20,}$/.test(id) ? `https://drive.google.com/file/d/${id}/preview` : null
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null
+  return `${BRIDGE_HTTP_URL}/pdf?url=${encodeURIComponent(url.href)}`
 }
 
 /** A whole document, rendered by the bridge so it can be framed at all. */
@@ -157,7 +172,7 @@ const CameraView = memo(function CameraView() {
   return <video ref={el} className="bl-camera" autoPlay playsInline muted />
 })
 
-const Body = memo(function Body({ blade }: { blade: Blade }) {
+const Body = memo(function Body({ blade, previous, next }: { blade: Blade; previous?: () => void; next?: () => void }) {
   if (blade.kind === 'camera') return <CameraView />
 
   if (blade.kind === 'article' && blade.url) {
@@ -198,6 +213,24 @@ const Body = memo(function Body({ blade }: { blade: Blade }) {
     )
   }
 
+  if (blade.kind === 'pdf' && blade.url) {
+    const src = pdfUrl(blade.url)
+    if (!src) return <p className="bl-note">That document could not be opened.</p>
+    const drive = src.startsWith('https://drive.google.com/')
+    return (
+      <iframe
+        className="bl-frame"
+        src={src}
+        // Drive's viewer needs its own origin to see the user's sign-in.
+        // Chrome's PDF viewer refuses to run in any sandboxed frame at all,
+        // and what the bridge serves there is a PDF, never a page of script.
+        {...(drive ? { sandbox: 'allow-scripts allow-same-origin allow-popups' } : {})}
+        referrerPolicy="no-referrer"
+        title={blade.title}
+      />
+    )
+  }
+
   if (blade.kind === 'video' && blade.url) {
     return (
       <video
@@ -211,28 +244,15 @@ const Body = memo(function Body({ blade }: { blade: Blade }) {
   }
 
   if (blade.kind === 'image' && blade.url) {
-    return <img className="bl-image" src={viaBridge(blade.url, 'img')} alt={blade.title} />
+    return <ImageViewer key={blade.url} sources={[blade.url]} title={blade.title} previous={previous} next={next} />
   }
 
   if (blade.kind === 'gallery') {
-    return (
-      <div className="bl-gallery">
-        {(blade.images ?? []).map((src, i) => (
-          <img key={`${src}-${i}`} className="bl-thumb" src={viaBridge(src, 'img')} alt="" />
-        ))}
-      </div>
-    )
+    return <ImageViewer sources={blade.images ?? []} title={blade.title} />
   }
 
   if (blade.kind === 'markup' && blade.html) {
-    // Model-authored markup gets exactly the treatment panel markup gets.
-    // There is one sanitiser, and this is it.
-    return (
-      <div
-        className="bl-markup p-body"
-        dangerouslySetInnerHTML={{ __html: sanitisePanelHtml(blade.html) }}
-      />
-    )
+    return <MarkupView key={blade.html} html={blade.html} title={blade.title} />
   }
 
   return <p className="bl-note">Nothing to show.</p>
@@ -531,7 +551,7 @@ function Card({
           <span className="bl-title">{blade.title}</span>
           <span className="bl-kind">{blade.kind}</span>
           <span className="bl-acts">
-            {(size || pos.x || pos.y) && !expanded && (
+            {Boolean(size || pos.x || pos.y) && !expanded && (
               <button
                 className="bl-btn"
                 onClick={(e) => {
@@ -567,7 +587,11 @@ function Card({
           </span>
         </header>
 
-        <div className="bl-body" ref={body} onPointerDown={onBodyDown}>
+        <div className="bl-body" ref={body} onPointerDown={(event) => {
+          // Image gestures belong to the viewer, including synthetic hand input.
+          if ((event.target as HTMLElement).closest('.image-viewer, .markup-image-viewer, img[role="button"]')) return
+          onBodyDown(event)
+        }}>
           <Body blade={blade} />
         </div>
 
@@ -581,6 +605,7 @@ function Card({
 /* ------------------------------------------------------------------- stack */
 
 export function Blades() {
+  const mobile = useMobileLayout()
   const blades = useStore((s) => s.blades)
   const focusedBlade = useStore((s) => s.focusedBlade)
   const expandedBlade = useStore((s) => s.expandedBlade)
@@ -605,16 +630,20 @@ export function Blades() {
     return [lifted, ...copy]
   }, [blades, focusedBlade])
 
-  const front = ordered[0]
+  const front = ordered.find((blade) => blade.id === expandedBlade) ?? ordered[0]
+
+  const select = useCallback((id: string) => {
+    focusBlade(id)
+    if (expandedBlade) expandBlade(id)
+  }, [focusBlade, expandedBlade, expandBlade])
 
   const cycle = useCallback(
     (by: number) => {
-      if (ordered.length < 2) return
-      const at = ordered.findIndex((b) => b.id === front?.id)
-      const next = ordered[(at + by + ordered.length) % ordered.length]
-      if (next) focusBlade(next.id)
+      if (blades.length < 2) return
+      const next = adjacentBlade(blades, front?.id, by)
+      if (next) select(next.id)
     },
-    [ordered, front, focusBlade],
+    [blades, front, select],
   )
 
   // Bound here rather than in App, and only while something is open, so E and X
@@ -626,12 +655,16 @@ export function Blades() {
     const onKey = (e: KeyboardEvent) => {
       if (!live.current) return
       const tag = (e.target as HTMLElement)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable || e.defaultPrevented) return
       if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
 
       if (e.key === 'e') {
         e.preventDefault()
         expandBlade(expandedBlade ? null : (front?.id ?? null))
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        if (expandedBlade) expandBlade(null)
+        else if (front) closeBlade(front.id)
       } else if (e.key === 'x') {
         e.preventDefault()
         if (front) closeBlade(front.id)
@@ -648,6 +681,17 @@ export function Blades() {
   }, [front, expandedBlade, expandBlade, closeBlade, cycle])
 
   if (!blades.length) return null
+
+  if (mobile && front) {
+    const active = blades.find((blade) => blade.id === expandedBlade) ?? front
+    const at = blades.findIndex((blade) => blade.id === active.id)
+    const previous = at > 0 ? () => select(blades[at - 1].id) : undefined
+    const next = at < blades.length - 1 ? () => select(blades[at + 1].id) : undefined
+    return createPortal(<MobileBlades blades={blades} active={active} expanded={Boolean(expandedBlade)}
+      onSelect={select} onExpand={() => expandBlade(expandedBlade ? null : active.id)} onClose={() => closeBlade(active.id)}>
+      <Body blade={active} previous={previous} next={next} />
+    </MobileBlades>, document.body)
+  }
 
   return (
     <div className={`blades-stack${expandedBlade ? ' blades-stack-full' : ''}`}>

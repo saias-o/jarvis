@@ -1,3 +1,5 @@
+import { isAndroid, JarvisSpeech } from './android'
+import { bridgeFetch } from './bridgeAuth'
 import {
   env,
   USE_ELEVENLABS,
@@ -5,9 +7,11 @@ import {
   TTS_ENGINE,
   KOKORO_VOICE,
   BRIDGE_HTTP_URL,
+  VOICE_LANG,
 } from '../config'
 import * as kokoro from './kokoro'
 import { caps } from './capabilities'
+import { createNativeSpeech } from './nativeSpeech'
 
 /**
  * Speech output.
@@ -208,8 +212,44 @@ function score(v: SpeechSynthesisVoice): number {
  *  otherwise the picker cycles through a dozen US novelty voices. */
 const USABLE = 40
 
+/** The language part of VOICE_LANG ("fr" for "fr-FR"). */
+const LANG_PREFIX = VOICE_LANG.split(/[-_]/)[0].toLowerCase()
+const IS_ENGLISH = LANG_PREFIX === 'en'
+
+function speaksLang(v: SpeechSynthesisVoice): boolean {
+  return v.lang.toLowerCase().split(/[-_]/)[0] === LANG_PREFIX
+}
+
+/**
+ * The same ranking for any other language. The name lists above are all
+ * English, so here it is the region, the quality tier and a male-presenting
+ * name that count — a deep male voice still reads closest to the character.
+ */
+function scoreOther(v: SpeechSynthesisVoice): number {
+  const n = v.name.toLowerCase()
+  let s = 40
+  if (v.lang.toLowerCase().replace('_', '-') === VOICE_LANG.toLowerCase()) s += 25
+  // Edge's neural "Online (Natural)" voices are far better than the SAPI ones.
+  if (n.includes('natural') || n.includes('online')) s += 30
+  if (n.includes('premium')) s += 30
+  else if (n.includes('enhanced')) s += 20
+  if (n.startsWith('google')) s += 10
+  if (/\b(henri|paul|thomas|claude|remy|rémy|jerome|jérôme|antoine|maxime|nicolas|gerard|gérard|guillaume|jean|fabrice|alain)\b/.test(n)) s += 20
+  if (/\b(denise|julie|hortense|amelie|amélie|audrey|marie|aurelie|aurélie|virginie|celine|céline|sylvie|eloise|éloïse|vivienne|brigitte|josephine|joséphine)\b/.test(n)) s -= 10
+  return s
+}
+
 /** Best-first list of usable voices — also what the voice picker cycles. */
 export function candidateVoices(): SpeechSynthesisVoice[] {
+  if (isAndroid || typeof speechSynthesis === 'undefined') return []
+  if (!IS_ENGLISH) {
+    return speechSynthesis
+      .getVoices()
+      .filter(speaksLang)
+      .map((v) => ({ v, s: scoreOther(v) }))
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.v)
+  }
   return speechSynthesis
     .getVoices()
     .filter((v) => /^en/i.test(v.lang))
@@ -222,6 +262,7 @@ export function candidateVoices(): SpeechSynthesisVoice[] {
 let cachedVoice: SpeechSynthesisVoice | null | undefined
 
 function pickVoice(): SpeechSynthesisVoice | null {
+  if (isAndroid) return null
   if (cachedVoice !== undefined) return cachedVoice
   const all = speechSynthesis.getVoices()
   if (!all.length) return null // not loaded yet — try again next utterance
@@ -231,12 +272,14 @@ function pickVoice(): SpeechSynthesisVoice | null {
   // if that voice is ever reinstalled.
   const saved = localStorage.getItem(VOICE_PREF_KEY)
   if (saved) {
-    const hit = all.find((v) => v.name === saved)
+    // A voice saved under another language would read every answer with the
+    // wrong accent, so it only counts if it speaks VOICE_LANG.
+    const hit = all.find((v) => v.name === saved && speaksLang(v))
     if (hit) return (cachedVoice = hit)
     localStorage.removeItem(VOICE_PREF_KEY)
   }
 
-  cachedVoice = candidateVoices()[0] ?? all.find((v) => /^en/i.test(v.lang)) ?? null
+  cachedVoice = candidateVoices()[0] ?? all.find(speaksLang) ?? null
   return cachedVoice
 }
 
@@ -244,6 +287,7 @@ function pickVoice(): SpeechSynthesisVoice | null {
  *  always naming a speechSynthesis voice that a cloud or neural engine has
  *  quietly replaced. */
 export function currentVoiceName(): string {
+  if (isAndroid && !caps().tts) return 'Android'
   if (USE_ELEVENLABS || caps().tts) return 'ElevenLabs'
   if (TTS_ENGINE === 'kokoro' && !kokoro.isUnavailable()) {
     return KOKORO_VOICE.replace(/^bm_/, '')
@@ -343,7 +387,7 @@ export function createSpeaker(): Speaker {
   let pumping = false
 
   let currentAudio: HTMLAudioElement | null = null
-  let nativeInFlight = false
+  let nativeSpeech: ReturnType<typeof createNativeSpeech> | null = null
   let drained: Array<() => void> = []
 
   const settleDrained = () => {
@@ -459,127 +503,50 @@ export function createSpeaker(): Speaker {
     }
   }
 
-  const speakNative = (text: string) =>
-    new Promise<boolean>((resolve) => {
-      // Chrome's speechSynthesis wedges after cancel().
-      //
-      // This is the single most likely reason a whole session goes silent. The
-      // engine is a global singleton, `cancel()` can leave its queue in a state
-      // where every subsequent speak() is accepted and then never spoken — no
-      // error, no events, just silence for the rest of the page's life. Barge-in
-      // calls cancel() constantly now that the microphone stays open, so what
-      // used to be a rare quirk became the common case.
-      //
-      // resume() is the documented un-wedge. It is a no-op when nothing is
-      // paused, so it is safe to fire before every utterance.
-      speechSynthesis.resume()
-
-      const u = new SpeechSynthesisUtterance(text)
-      const voice = pickVoice()
-      if (voice) u.voice = voice
-      u.lang = voice?.lang ?? 'en-GB'
-      // Deliberate, and deliberately invariant — the character's pace does not
-      // change with stakes, and that steadiness is most of the effect. This
-      // lands around 130 wpm, below the median for film dialogue.
-      u.rate = 0.92
-      // Mid-baritone, and *not* pushed lower for gravitas. The voice is
-      // clarity-weighted rather than chest-weighted; dropping it further reads
-      // as a film-trailer voiceover, which is the wrong character entirely.
-      u.pitch = 0.95
-
-      // speechSynthesis exposes no amplitude, so drive the reactor from a
-      // synthetic envelope. It only has to look like speech, not match it.
-      let raf = 0
-      let t = 0
-      const tick = () => {
-        t += 0.08
-        outLevel =
-          0.35 +
-          Math.abs(Math.sin(t * 2.1)) * 0.3 +
-          Math.abs(Math.sin(t * 5.7)) * 0.2
-        raf = requestAnimationFrame(tick)
-      }
-      tick()
-
-      let done = false
-      let started = false
-      let watchdog: ReturnType<typeof setTimeout> | null = null
-      let keepalive: ReturnType<typeof setInterval> | null = null
-
-      const finish = () => {
-        if (done) return
-        done = true
-        nativeInFlight = false
-        if (watchdog) clearTimeout(watchdog)
-        if (keepalive) clearInterval(keepalive)
-        cancelAnimationFrame(raf)
-        // Held rather than zeroed, so the orb doesn't collapse in the gap
-        // between two sentences of the same answer.
-        outLevel = 0.12
-        // The whole point of the boolean: `true` only if sound actually began.
-        resolve(started)
-      }
-
-      u.onstart = () => {
-        started = true
+  const speakNative = async (text: string): Promise<boolean> => {
+    if (isAndroid) {
+      diag.spoken++; diag.voice = 'Android'; diag.lastText = text.slice(0, 60)
+      const result = await JarvisSpeech.speak({ text, lang: VOICE_LANG })
+      if (result.completed) diag.started++
+      return result.completed
+    }
+    nativeSpeech ??= createNativeSpeech({
+      synth: speechSynthesis,
+      voice: pickVoice,
+      lang: VOICE_LANG,
+      onQueue: (utterance) => {
+        diag.spoken++
+        diag.lastText = utterance.text.slice(0, 60)
+        diag.voice = utterance.voice?.name ?? 'default'
+      },
+      onStart: () => {
         diag.started++
         diag.lastError = ''
-        if (watchdog) clearTimeout(watchdog)
-        // Chrome stops speaking after roughly fifteen seconds unless the engine
-        // is nudged. A pause/resume pair is the standard keepalive and is
-        // inaudible; without it long answers cut off mid-sentence.
-        keepalive = setInterval(() => {
-          if (done) return
-          speechSynthesis.pause()
-          speechSynthesis.resume()
-        }, 5000)
-      }
-      u.onend = finish
-      // Swallowing this was a mistake. When the OS voice fails there is no
-      // other signal at all — no exception, no silence you can detect from
-      // code — so an unlogged onerror turns a broken voice into an unexplained
-      // quiet app, which is exactly the bug that took three attempts to find.
-      u.onerror = (e) => {
-        const code = String((e as SpeechSynthesisErrorEvent).error ?? 'unknown')
+      },
+      onError: (code, utterance) => {
+        if (cancelled) return
         diag.lastError = code
-        // 'interrupted' and 'canceled' are us, cancelling deliberately on a
-        // barge-in. Everything else means the engine could not speak.
-        if (code !== 'interrupted' && code !== 'canceled') {
-          diag.failures++
-          console.error(`[jarvis] speech failed (${code}) on voice "${u.voice?.name ?? 'default'}"`)
-        }
-        finish()
-      }
-
-      // If `start` never arrives the engine has swallowed the utterance, and
-      // nothing else will ever tell us — no error fires. Un-wedge and try once
-      // more; if that also goes nowhere, resolve rather than hang, because a
-      // silent sentence is recoverable and a stuck queue is not.
-      watchdog = setTimeout(() => {
-        if (done || started) return
-        console.warn('[jarvis] speech did not start — un-wedging the engine')
-        speechSynthesis.cancel()
-        speechSynthesis.resume()
-        try {
-          speechSynthesis.speak(u)
-        } catch {
-          finish()
-          return
-        }
-        watchdog = setTimeout(() => {
-          if (done || started) return
-          console.error('[jarvis] speech engine is not responding — switching to the cloud voice')
-          diag.failures++
-          diag.lastError = diag.lastError || 'no-start'
-          finish()
-        }, 1500)
-      }, 700)
-      diag.spoken++
-      diag.lastText = text.slice(0, 60)
-      diag.voice = u.voice?.name ?? 'default'
-      nativeInFlight = true
-      speechSynthesis.speak(u)
+        diag.failures++
+        console.error(`[jarvis] speech failed (${code}) on voice "${utterance.voice?.name ?? 'default'}"`)
+      },
     })
+    // The envelope is visual only. Audio runs to completion without the old
+    // five-second pause/resume timer, which cancels speech on Android.
+    let raf = 0
+    let t = 0
+    const tick = () => {
+      t += 0.08
+      outLevel = 0.35 + Math.abs(Math.sin(t * 2.1)) * 0.3 + Math.abs(Math.sin(t * 5.7)) * 0.2
+      raf = requestAnimationFrame(tick)
+    }
+    tick()
+    try {
+      return await nativeSpeech.speak(text)
+    } finally {
+      cancelAnimationFrame(raf)
+      outLevel = 0.12
+    }
+  }
 
   const playUrl = (url: string, text: string) =>
     new Promise<void>((resolve) => {
@@ -715,16 +682,10 @@ export function createSpeaker(): Speaker {
       // recognised and discarded, even though he has stopped adding to them.
       setSpeaking('')
 
-      // Only reach for the global cancel if this speaker actually has a native
-      // utterance out — speechSynthesis.cancel() is document-wide and would
-      // otherwise silence an unrelated speaker mid-word.
-      if (nativeInFlight) {
-        nativeInFlight = false
-        speechSynthesis.cancel()
-        // Always pair the cancel with a resume — see the note in speakNative.
-        // Leaving the engine cancelled is what silences every later sentence.
-        speechSynthesis.resume()
-      }
+      // Only this speaker's active native utterance may be cancelled. The
+      // controller also settles its promise if the browser emits no event.
+      if (isAndroid) void JarvisSpeech.stopSpeaking()
+      nativeSpeech?.cancel()
       if (currentAudio) {
         currentAudio.pause()
         currentAudio = null
@@ -741,7 +702,7 @@ export function createSpeaker(): Speaker {
 async function fetchCloudAudio(text: string): Promise<string | null> {
   if (BACKEND === 'bridge') {
     try {
-      const res = await fetch(`${BRIDGE_HTTP_URL}/tts`, {
+      const res = await bridgeFetch(`${BRIDGE_HTTP_URL}/tts`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text }),
