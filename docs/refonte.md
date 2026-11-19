@@ -14,7 +14,17 @@ Audit du 19 novembre 2026 sur Windows, branche `codex/android`, base Git `6933b6
   - [ ] Valider sur téléphone : Gemma avec PC joignable (lire un fichier PC autorisé, afficher son image), PC absent, inférence PC coupée en cours de tour. Aucun appareil n'était branché lors de la livraison du code.
 - [ ] **Lot 5** · Unifier les capacités et les consignes.
   - [x] Mémoire unique : format, limites (200 faits de 300 caractères, les plus anciens sortent), déduplication et correspondance de `forget` vivent dans `shared/memory.mjs`. Chaque appareil ne fournit que la lecture et l'écriture de son fichier (`memoryFile` sur PC, `readMemory`/`writeMemory` du plugin Kotlin, qui ne tronque plus la lecture à 6 000 caractères). Les deux formats existants (`# JARVIS memory` daté, `# Memory` du téléphone) sont lus ; le téléphone répond désormais « Nothing matched. » quand rien ne correspond. Claude ne reçoit plus `remember`/`forget` deux fois : `jarvis_device` les exclut et `jarvis_memory` porte les entrées du catalogue commun, sous les mêmes noms MCP. Vérifié par `test/memory.test.mjs` (mêmes réponses pas à pas sur téléphone et PC, appels concurrents), suite complète, lint et build ; compilation Kotlin par la CI.
-  - [ ] Inventorier et partager les capacités propres au SDK PC (navigateur, caméra, affichage riche, commandes d'interface).
+  - [x] Inventaire des capacités propres au SDK PC (19 novembre 2026). Toutes sont des serveurs MCP construits par connexion dans `bridge/server.mjs` ; aucune n'est dans le catalogue commun, et `brain.ts` désactive leurs canaux sur Android (`watchUi`, `watchCapture`, `watchBlades`).
+
+    | Serveur MCP | Outils | Primitive nécessaire | Sur Android aujourd'hui |
+    |---|---|---|---|
+    | `jarvis_ui` (`bridge/ui.mjs`) | `ui_theme`, `ui_reactor`, `ui_orbit`, `ui_chrome`, `ui_effect`, `ui_screen`, `ui_reset` | Appliquer une opération à l'interface React, la même sur les deux supports | Absent, alors que l'interface est le même code |
+    | `jarvis_eyes` (`bridge/vision.mjs`) | `look`, `watch` | Une image de la caméra de l'appareil qui affiche l'interface | Absent ; `camera.ts` existe déjà côté React |
+    | `jarvis` (`bridge/panels.mjs`) | `display` (HTML riche), `blade`, `probe_url` | Poser un panneau sur l'écran | Partiel : `show` couvre texte et image, pas le HTML nettoyé ni les panneaux persistants |
+    | `jarvis_chrome` (`bridge/chrome.mjs`) | 16 outils `chrome_*` | Le Chrome du PC via son hôte natif | Absent ; ne peut exister que comme outils `pc_chrome_*` exposés par `/pc-tools` |
+
+    Ordre proposé : `jarvis_ui` d'abord (le code d'application est déjà commun, seul le transport manque), puis `display` dans `show`, puis la caméra, puis Chrome via `/pc-tools`. Pour Gemma, chaque nouvelle famille doit devenir un groupe sélectionnable comme `select_device_tools`, sinon le budget de 6 144 octets est dépassé. Garder les noms `mcp__jarvis_ui__*` etc. côté Claude pendant la transition.
+  - [ ] Migrer ces familles dans le catalogue commun, dans l'ordre ci-dessus, en vérifiant schéma reçu **et** exécution sur l'appareil annoncé.
 - [ ] **Lot 6** · Découper le bridge et vérifier ses contrats.
 - [ ] **Lot 7** · Isoler la voix et la présentation.
 - [ ] **Lot 8** · Mesurer et réduire le coût de démarrage et des traces.
