@@ -15,8 +15,7 @@
  * attribution and safe on a monetised channel, unlike the actual film score,
  * which would be claimed within a day of upload.
  *
- * Everything degrades quietly: if a file is missing the cue simply doesn't
- * play, and the synthesised bed in sfx.ts covers the ambient case.
+ * A missing file silences only that cue.
  */
 
 type Cue = 'boot-music' | 'ambient' | 'work'

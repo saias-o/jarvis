@@ -1,34 +1,27 @@
 /** Browser-safe agent loop shared by Ollama and the Android runtime. */
-const clip = (text, max) => {
-  const s = String(text ?? '')
-  return s.length > max ? `${s.slice(0, max)}…` : s
-}
+import { excerpt, UNCONFIRMED_RESULT } from './conversation.mjs'
 
 /** Tool arguments are an object in Ollama's API; some models still send a string. */
 function parseArgs(raw) {
-  if (raw && typeof raw === 'object') return raw
-  if (typeof raw !== 'string') return {}
-  try {
-    const parsed = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
+  const args = typeof raw === 'string' ? JSON.parse(raw) : raw
+  if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Expected an object of tool arguments')
+  return args
 }
 
 export async function agentTurn(text, {
   chat, system = '', history = [], tools = [], images = [], signal,
-  onText, onTool, onMessages, maxSteps = 6,
+  onText, onTool, onMessages, onCheckpoint, onProgress, trace, observations = [], maxSteps = 6,
 }) {
   signal?.throwIfAborted()
   maxSteps = Math.max(1, Math.min(12, Math.floor(maxSteps) || 6))
   const messages = [
     { role: 'system', content: system ?? '' },
-    ...history.flatMap((exchange) => exchange.messages?.map((message) => ({ ...message, content: clip(message.content, 1200) })) ?? [
-      { role: 'user', content: clip(exchange.user, 1200) },
-      { role: 'assistant', content: clip(exchange.jarvis, 1200) },
+    ...history.flatMap((exchange) => exchange.messages?.map(({ thinking: _thinking, ...message }) => ({ ...message })) ?? [
+      { role: 'user', content: String(exchange.user ?? '') },
+      { role: 'assistant', content: String(exchange.jarvis ?? '') },
     ]),
     { role: 'user', content: text, ...(images.length ? { images } : {}) },
+    ...observations.map((message) => ({ ...message })),
   ]
   const specs = tools.map((t) => ({
     type: 'function',
@@ -36,53 +29,76 @@ export async function agentTurn(text, {
   }))
   const byName = new Map(tools.map((t) => [t.name, t]))
   const said = []
+  const turnStart = messages.length - observations.length - 1
+  const snapshot = () => messages.slice(turnStart).map(({ thinking: _thinking, images: _images, ...message }) => ({ ...message }))
 
   for (let step = 0; step < maxSteps; step++) {
     signal?.throwIfAborted()
     // The last call gets no tools, so a model that would rather keep looking
     // things up for ever has to say something instead.
     const offer = step < maxSteps - 1 ? specs : []
+    await trace?.('model.request', { step, messages, tools: offer })
     let content = ''
+    let thinking = ''
     const calls = []
     const stream = chat(messages, offer, signal)
-    for await (const chunk of stream) {
-      const message = chunk.message ?? {}
-      if (message.content) {
-        content += message.content
-        onText?.(message.content)
+    try {
+      for await (const chunk of stream) {
+        onProgress?.()
+        const message = chunk.message ?? {}
+        if (message.thinking) thinking += message.thinking
+        if (message.content) {
+          content += message.content
+          onText?.(message.content)
+        }
+        if (Array.isArray(message.tool_calls)) calls.push(...message.tool_calls)
       }
-      if (Array.isArray(message.tool_calls)) calls.push(...message.tool_calls)
-    }
+    } catch (error) { await trace?.('model.error', { step, error }); throw error }
+    await trace?.('model.response', { step, content, calls })
     if (content.trim()) said.push(content.trim())
-    messages.push({
+    const reply = {
       role: 'assistant',
       content,
-      ...(calls.length ? { tool_calls: calls } : {}),
-    })
+      ...(thinking ? { thinking } : {}),
+    }
+    messages.push(reply)
     signal?.throwIfAborted()
     if (!calls.length || !offer.length) break
 
-    for (const call of calls) {
+    for (const [index, call] of calls.entries()) {
       signal?.throwIfAborted()
       const name = String(call?.function?.name ?? '')
       const tool = byName.get(name)
+      const callId = globalThis.crypto?.randomUUID?.() ?? `${step}-${calls.indexOf(call)}`
+      const args = call?.function?.arguments
+      const started = Date.now()
+      await trace?.('tool.start', { callId, name, arguments: args, available: Boolean(tool) })
       let result
+      let error
+      // Only record calls reached so far. An interruption can strand the rest of a batch.
+      reply.tool_calls = calls.slice(0, index + 1)
       if (!tool) {
         result = `There is no tool called ${name}.`
       } else {
         onTool?.(name)
         try {
-          result = await tool.run(parseArgs(call.function.arguments), { signal })
+          signal?.throwIfAborted()
+          const parsed = parseArgs(args)
+          onCheckpoint?.([...snapshot(), { role: 'tool', tool_name: name, content: UNCONFIRMED_RESULT }])
+          result = await tool.run(parsed, { signal })
         } catch (err) {
-          result = `That failed: ${err?.message ?? err}`
+          error = err
+          result = `That failed: ${err?.message ?? err}. Verify any possible side effects before retrying.`
         }
       }
+      messages.push({ role: 'tool', tool_name: name, content: excerpt(String(result ?? ''), 6000) })
+      onCheckpoint?.(snapshot())
+      await trace?.('tool.result', { callId, name, result, error, durationMs: Date.now() - started, cancelled: signal?.aborted ?? false })
       signal?.throwIfAborted()
-      messages.push({ role: 'tool', tool_name: name, content: clip(result, 6000) })
     }
   }
   // Retain observations as well as speech. A later turn needs paths returned
   // by uploads and the outcomes of completed actions, not just their summary.
-  onMessages?.(messages.slice(1 + history.reduce((n, exchange) => n + (exchange.messages?.length ?? 2), 0)))
+  onMessages?.(snapshot())
   return said.join(' ')
 }

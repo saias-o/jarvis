@@ -26,6 +26,7 @@ export const JarvisSpeech = registerPlugin<Listener & {
 }>('JarvisSpeech')
 
 export const JarvisFiles = registerPlugin<{
+  appendTrace(options: { line: string; maxBytes: number; maxFiles: number }): Promise<{ path: string }>
   status(): Promise<{ granted: boolean; root: string; inbox: string }>
   requestAccess(): Promise<void>
   run(options: { name: string; args: Record<string, unknown> }): Promise<{ result: string }>

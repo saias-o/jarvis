@@ -1,6 +1,5 @@
-import { isAndroid } from './android'
 import { bridgeFetch } from './bridgeAuth'
-import { BACKEND, BRIDGE_HTTP_URL, env } from '../config'
+import { BACKEND, BRIDGE_HTTP_URL } from '../config'
 
 /**
  * What speech engines are actually available, decided once at boot.
@@ -28,16 +27,11 @@ export type Capabilities = {
 
 /** Browser-only until the probe says otherwise. Safe default: the app works. */
 let current: Capabilities = { stt: false, tts: false }
-let probed = false
 
 /** The last known capabilities. Read synchronously by the voice and speech
  *  layers; accurate once `probeCapabilities` has resolved during boot. */
 export function caps(): Capabilities {
   return current
-}
-
-export function capabilitiesProbed(): boolean {
-  return probed
 }
 
 /**
@@ -50,7 +44,6 @@ export async function probeCapabilities(): Promise<Capabilities> {
   if (BACKEND !== 'bridge') {
     // No bridge to ask. Direct mode has no server-side speech, so browser only.
     current = { stt: false, tts: false }
-    probed = true
     return current
   }
   try {
@@ -65,16 +58,6 @@ export async function probeCapabilities(): Promise<Capabilities> {
     // Bridge down or slow — stay on the browser engines rather than blocking
     // boot on a health check that is only an optimisation.
   }
-  probed = true
   return current
 }
 
-/** A short human label for the HUD: what voice stack is actually in play. */
-export function engineLabel(): string {
-  const c = current
-  if (c.stt && c.tts) return 'ElevenLabs'
-  if (c.tts) return 'ElevenLabs voice'
-  // env.elevenKey is only meaningful in direct mode; harmless to mention.
-  if (env.elevenKey && BACKEND !== 'bridge') return 'ElevenLabs (direct)'
-  return isAndroid ? 'Android speech' : 'browser speech'
-}

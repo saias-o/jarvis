@@ -23,8 +23,7 @@ import { mediaUrl } from '../lib/mediaUrl'
  * images (phone screenshots, generated art) land on disk as absolute paths.
  *
  * Only real disk paths qualify. Rewriting every src beginning with a slash also
- * caught the app's own assets, so `<img src="/vite.svg">` turned into a read of
- * `/vite.svg` on the host, 404'd, and rendered as 'image unavailable'.
+ * caught app assets such as `/icon.svg` and tried to read them on the host.
  *
  * `/img` and `/media` — remote http(s) sources, proxied rather than refused. The
  * browser still only ever talks to localhost, which is what lets the page CSP

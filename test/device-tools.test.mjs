@@ -88,7 +88,7 @@ test('folders are filtered, sorted and paged by the catalogue, whatever the devi
   assert.equal(await run('list_files', { folder: '/sdcard', kind: 'documents', contains: 'A' }),
     'alpha.PDF (10 bytes)\nzeta.txt (3 bytes)\n[End of folder: 2 entries total]')
   assert.equal(await run('list_files', { folder: '/sdcard', contains: 'photo' }), 'Photos/\n[End of folder: 1 entries total]')
-  await assert.rejects(run('list_files', { folder: '/sdcard', kind: 'videos' }), /Unknown file kind/)
+  await assert.rejects(run('list_files', { folder: '/sdcard', kind: 'videos' }), /kind/)
   assert.deepEqual([...new Set(asked)], ['/sdcard'])
 
   const page = await run('read_file', { path: '/sdcard/a.txt' })

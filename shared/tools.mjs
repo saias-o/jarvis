@@ -16,7 +16,7 @@
  * @property {(fact: string) => Promise<string>} remember
  * @property {(match: string) => Promise<string>} forget
  * @property {(path: string, content: string) => Promise<unknown>} [write]
- * @property {(from: string, to: string) => Promise<unknown>} [move]  Must never replace a destination.
+ * @property {(from: string, to: string, options?: { signal?: AbortSignal }) => Promise<unknown>} [move]  Must never replace a destination.
  * @property {(target: string) => Promise<unknown>} [open]
  * @property {(blade: object) => unknown} [show]  Puts a blade on the interface.
  * @property {Function} [http]  Transport for the web tools; see web-tools.mjs.
@@ -24,6 +24,7 @@
  */
 
 import { webTools } from './web-tools.mjs'
+import { validatedTool } from './tool-validation.mjs'
 
 const DOCUMENTS = new Set([
   'pdf', 'doc', 'docx', 'odt', 'ods', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'rtf',
@@ -48,7 +49,6 @@ export function deviceTools(platform, { page = 5000 } = {}) {
       description: 'List one page of a folder. contains filters by name; kind=documents keeps PDF, office and text files. Continue with the from offset returned.',
       parameters: schema({ folder: string, contains: string, kind: { type: 'string', enum: ['all', 'documents'] }, from: { type: 'number' } }, ['folder']),
       async run({ folder, contains, kind = 'all', from }) {
-        if (kind !== 'all' && kind !== 'documents') throw new Error('Unknown file kind')
         const needle = String(contains ?? '').trim().toLowerCase()
         const entries = (await platform.list(folder))
           .map((entry) => ({ ...entry, key: entry.name.toLowerCase() }))
@@ -90,7 +90,7 @@ export function deviceTools(platform, { page = 5000 } = {}) {
       name: 'write_file',
       description: 'Create or replace a text file.',
       parameters: schema({ path: string, content: string }),
-      run: async ({ path, content }) => (await platform.write(path, String(content ?? ''))) ?? 'Written.',
+      run: async ({ path, content }) => (await platform.write(path, content)) ?? 'Written.',
     })
   }
   if (platform.move) {
@@ -98,7 +98,7 @@ export function deviceTools(platform, { page = 5000 } = {}) {
       name: 'move_file',
       description: 'Move or rename a file; to is the full new path. Never replaces a destination.',
       parameters: schema({ from: string, to: string }),
-      run: async ({ from, to }) => (await platform.move(from, to)) ?? 'Moved.',
+      run: async ({ from, to }, options) => (await platform.move(from, to, options)) ?? 'Moved.',
     })
   }
   if (platform.open) {
@@ -132,8 +132,8 @@ export function deviceTools(platform, { page = 5000 } = {}) {
   if (platform.show) {
     tools.push({
       name: 'show',
-      description: 'Show text (one item per line) or an image on the screen instead of reading it aloud. image is a PC file path or the web address of an image.',
-      parameters: schema({ title: string, text: string, image: string }, ['title']),
+      description: 'Show text (one item per line) or an image on screen instead of reading it aloud. image: a PC file path or an image web address.',
+      parameters: schema({ title: string, text: string, image: string }, []),
       async run({ title, text, image }) {
         const blade = { id: crypto.randomUUID(), title: String(title ?? '').trim().slice(0, 60) || 'DISPLAY', hold: 'turn' }
         const source = String(image ?? '').trim()
@@ -159,5 +159,5 @@ export function deviceTools(platform, { page = 5000 } = {}) {
     })
   }
 
-  return tools
+  return tools.map(validatedTool)
 }

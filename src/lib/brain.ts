@@ -1,5 +1,6 @@
 import { isAndroid } from './android'
 import * as device from './device'
+import { androidRoute } from '../../shared/android-agent.mjs'
 import { readDeviceSettings } from './deviceSettings'
 import { BRIDGE_HTTP_URL, selectBridge } from '../config'
 import { bridgeFetch } from './bridgeAuth'
@@ -7,7 +8,7 @@ import { BACKEND } from '../config'
 import * as direct from './anthropic'
 import * as bridge from './bridge'
 import type { AskHandlers, Msg } from './anthropic'
-import type { Blade, BrainInfo, Panel } from '../store'
+import type { Blade, BrainInfo } from '../store'
 
 export type { AskHandlers, Msg }
 export type { ConnectionState } from './bridge'
@@ -38,9 +39,13 @@ export async function ask(
 ): Promise<{ text: string; tools: string[] }> {
   if (isAndroid) {
     const turn = ++androidTurn
-    await chooseAndroidBrain()
+    const route = await chooseAndroidRoute()
     if (turn !== androidTurn) return { text: '', tools: [] }
-    return device.ask(prompt, handlers, files, androidBrain)
+    if (route.pcUrl && route.pcUrl !== BRIDGE_HTTP_URL) {
+      bridge.disconnect()
+      selectBridge(route.pcUrl)
+    }
+    return device.ask(prompt, handlers, files, route)
   }
   return usingBridge
     ? bridge.ask(prompt, handlers, files)
@@ -48,32 +53,14 @@ export async function ask(
 }
 
 let androidTurn = 0
-let androidBrain: 'pc' | 'device' = 'device'
-
-export async function chooseAndroidBrain(): Promise<'pc' | 'device'> {
-  const settings = readDeviceSettings()
-  if (settings.mode === 'device') { androidBrain = 'device'; return androidBrain }
-  for (const pc of settings.pcs) {
-    if (pc !== BRIDGE_HTTP_URL) bridge.disconnect()
-    selectBridge(pc)
-    try {
-      const res = await bridgeFetch(`${pc}/health`, { signal: AbortSignal.timeout(5000) })
-      if (res.status === 401 && settings.mode === 'pc') throw new Error('Code d’accès requis : ouvrez Réglages Android.')
-      if (res.ok) {
-        const health = await res.json()
-        if (health.inference === 'android-v1') { androidBrain = 'pc'; return androidBrain }
-        if (settings.mode === 'pc') throw new Error('Mettez à jour le serveur PC : inférence Android indisponible.')
-      }
-    } catch (err) { if (settings.mode === 'pc' && err instanceof Error && /Code d’accès|Mettez à jour/.test(err.message)) throw err }
-  }
-  if (settings.mode === 'pc') throw new Error('PC injoignable. Vérifiez Tailscale et son adresse dans Réglages Android.')
-  androidBrain = 'device'
-  return androidBrain
+function chooseAndroidRoute() {
+  const signal = AbortSignal.timeout(3500)
+  return androidRoute(readDeviceSettings(), (pc) => bridgeFetch(`${pc}/health`, { signal }, pc))
 }
 
 export async function warm(): Promise<void> {
   if (isAndroid) {
-    await chooseAndroidBrain()
+    await chooseAndroidRoute()
     // Let the interface open before a multi-gigabyte model is downloaded.
     return
   }
@@ -86,13 +73,7 @@ export function watchServers(fn: (servers: string[]) => void): void {
   if (usingBridge && !isAndroid) bridge.watchServers(fn)
 }
 
-/** HUD panels are pushed mid-turn by the `display` tool, not returned by ask(). */
-export function watchPanels(fn: (panel: Panel) => void): void {
-  if (usingBridge && !isAndroid) bridge.watchPanels(fn)
-}
-
-/** Blades — the big surface — arrive the same way, from the `blade` tool. Like
- *  panels and the ui_* commands, this is a bridge capability: the direct path
+/** Blades arrive from `display` and `blade`. Like ui_* commands, this is a bridge capability: the direct path
  *  has no channel for a server to volunteer anything mid-turn. */
 export function watchBlades(fn: (blade: Blade) => void): void {
   if (usingBridge && !isAndroid) bridge.watchBlades(fn)
@@ -106,7 +87,7 @@ export function watchBrain(fn: (brain: BrainInfo) => void): void {
 
 /**
  * Redressing the interface — theme, reactor, orbiting objects, effects — is a
- * bridge capability, like panels. The `ui_*` tools live in an in-process MCP
+ * bridge capability, like blades. The `ui_*` tools live in an in-process MCP
  * server inside the bridge and push straight down the open socket, mid-turn.
  * The direct path has no such channel: the browser talks to the Messages API
  * over one-shot HTTPS requests and gets back an answer, with nowhere for a
@@ -145,11 +126,6 @@ export function cancel(): void {
   else direct.cancel()
 }
 
-/** The older name for `cancel()`. */
-export function interrupt(): void {
-  cancel()
-}
-
 /**
  * Whether the brain is reachable right now.
  *
@@ -164,10 +140,8 @@ export function isConnected(): boolean {
 /**
  * Connection state, for the UI.
  *
- * Worth surfacing because in bridge mode the socket *is* the conversation: all
- * of JARVIS's memory of the exchange lives in the agent session behind it, so a
- * drop wipes the conversation while the transcript on screen still shows it.
- * Never fires on the direct path, which has no connection to lose.
+ * Completed exchanges are restored after a drop. The direct path has no
+ * connection to lose and emits no connection events.
  */
 export function watchConnection(
   fn: (state: bridge.ConnectionState) => void,

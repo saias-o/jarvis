@@ -31,16 +31,6 @@ const WORKING = [
   'Under way.',
 ]
 
-/** Acknowledging an order where no tool is involved. */
-const ACKNOWLEDGE = [
-  'As you wish, sir.',
-  'Very good, sir.',
-  'Certainly.',
-  'Understood.',
-  'Consider it done.',
-  'Directly, sir.',
-]
-
 /** Answering to his name, before the user has said what they want. */
 const ATTENTION = [
   'Yes, sir?',
@@ -50,7 +40,7 @@ const ATTENTION = [
   'Awake, sir.',
 ]
 
-/** The same three pools in French, for VITE_VOICE_LANG=fr-*. Same grammar:
+/** The same pools in French, for VITE_VOICE_LANG=fr-*. Same grammar:
  *  short, level, no eagerness, "monsieur" only at the end. */
 const WORKING_FR = [
   'Je m’en occupe.',
@@ -61,15 +51,6 @@ const WORKING_FR = [
   'Je lance la requête.',
   'Un instant.',
   'C’est en cours.',
-]
-
-const ACKNOWLEDGE_FR = [
-  'À vos ordres.',
-  'Très bien.',
-  'Entendu.',
-  'C’est noté.',
-  'Considérez que c’est fait.',
-  'Certainement.',
 ]
 
 const ATTENTION_FR = [
@@ -95,8 +76,7 @@ function makePicker(pool: string[]) {
   }
 }
 
-export const working = makePicker(IS_FRENCH ? WORKING_FR : WORKING)
-export const acknowledge = makePicker(IS_FRENCH ? ACKNOWLEDGE_FR : ACKNOWLEDGE)
+const working = makePicker(IS_FRENCH ? WORKING_FR : WORKING)
 export const attention = makePicker(IS_FRENCH ? ATTENTION_FR : ATTENTION)
 
 /**

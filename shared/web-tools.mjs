@@ -166,7 +166,7 @@ export function webTools(http, { limit = 5000 } = {}) {
   return [
     {
       name: 'web_search',
-      description: 'Search the internet: titles, addresses and excerpts. Use it for news and any fact you are not sure of.',
+      description: 'Search the internet: titles, addresses and excerpts.',
       parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
       async run({ query }, { signal } = {}) {
         const words = String(query ?? '').trim()
@@ -199,7 +199,7 @@ export function webTools(http, { limit = 5000 } = {}) {
     },
     {
       name: 'web_fetch',
-      description: 'Read a web page as text, continuing from character offset from. Its Image: line is the address of the page’s picture, to pass to show.',
+      description: 'Read a web page as text, continuing from character offset from. Its Image: line is the page’s picture address.',
       parameters: { type: 'object', properties: { url: { type: 'string' }, from: { type: 'number' } }, required: ['url'] },
       async run({ url, from }, { signal } = {}) {
         const page = await request(http, url, {

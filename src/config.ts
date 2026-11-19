@@ -198,7 +198,6 @@ export const env = {
   elevenKey: str(import.meta.env.VITE_ELEVENLABS_API_KEY) ?? '',
   elevenVoiceId:
     str(import.meta.env.VITE_ELEVENLABS_VOICE_ID) ?? 'JBFqnCBsd6RMkjVDRZzb',
-  porcupineKey: str(import.meta.env.VITE_PICOVOICE_ACCESS_KEY) ?? '',
 }
 
 /** `claude-opus-5` is the strongest model; `claude-sonnet-5` trades a little
@@ -211,18 +210,6 @@ export const MODEL = 'claude-opus-5'
  * For a recorded demo the snappiness is worth it; flip to false to save money.
  */
 export const FAST_MODE = true
-
-/**
- * Wake-word engine.
- *   'speech'    — zero setup, uses the browser's SpeechRecognition to listen for
- *                 "hey jarvis". Chrome/Edge only, audio goes to Google.
- *   'porcupine' — recommended. Runs offline in WASM, "Jarvis" is a built-in
- *                 keyword, far fewer false triggers. Needs a free AccessKey
- *                 from console.picovoice.ai.
- */
-export const WAKE_ENGINE: 'speech' | 'porcupine' = env.porcupineKey
-  ? 'porcupine'
-  : 'speech'
 
 // ---------------------------------------------------------------------------
 // MCP servers

@@ -1,5 +1,8 @@
 const encoder = new TextEncoder()
-const bytes = (value) => encoder.encode(JSON.stringify(value)).length
+// Base64 images are encoded by the model's image processor, not tokenized as
+// megabytes of text. Keep the payload intact while budgeting the text context.
+const bytes = (value) => encoder.encode(JSON.stringify(value, (key, item) =>
+  key === 'images' && Array.isArray(item) ? item.map(() => '[image]') : item)).length
 
 function excerpt(text, limit) {
   if (text.length <= limit) return text
@@ -47,6 +50,11 @@ export async function* boundedChat(chat, messages, tools, signal) {
     try {
       for await (const chunk of chat(fitted, tools, signal)) {
         signal?.throwIfAborted()
+        for (const call of chunk.message?.tool_calls ?? []) {
+          if (!tools.some((tool) => tool.function?.name === call.function?.name)) {
+            throw new Error(`Outil indisponible pour cette étape : ${call.function?.name}`)
+          }
+        }
         if (chunk.message?.content || chunk.message?.tool_calls?.length) produced = true
         yield chunk
       }

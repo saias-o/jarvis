@@ -2,6 +2,12 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { fitContext, boundedChat } from '../shared/context-window.mjs'
 
+test('image attachments remain available without being counted as base64 text tokens', () => {
+  const images = ['A'.repeat(50_000)]
+  const fitted = fitContext([{ role: 'system', content: 'Inspect the attached image.' }, { role: 'user', content: 'What is shown?', images }], [], 1000)
+  assert.deepEqual(fitted[1].images, images)
+})
+
 test('long conversation history leaves room for a directory page and current request', () => {
   const listing = 'résumé.pdf (900 bytes)\n'.repeat(65)
   const calls = [{ function: { name: 'list_files', arguments: { folder: '/Download' } } }]
@@ -87,9 +93,17 @@ test('a streamed tool call prevents retrying an overflow', async () => {
     throw new Error('Input token ids are too long')
   }
   await assert.rejects(async () => {
-    for await (const _chunk of boundedChat(chat, [{ role: 'user', content: 'move' }], [])) { /* consume */ }
+    for await (const _chunk of boundedChat(chat, [{ role: 'user', content: 'move' }], [{ function: { name: 'move_file' } }])) { /* consume */ }
   }, /limite de contexte/)
   assert.equal(requests, 1)
+})
+
+test('a local fallback cannot dispatch a tool removed from its current offer', async () => {
+  async function* chat() {
+    yield { message: { tool_calls: [{ function: { name: 'pc_move_file', arguments: {} } }] } }
+  }
+  const stream = boundedChat(chat, [{ role: 'user', content: 'move' }], [{ function: { name: 'list_files' } }])
+  await assert.rejects(stream.next(), /pc_move_file/)
 })
 
 test('cancellation between rejected attempts stops further native requests', async () => {

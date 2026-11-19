@@ -338,7 +338,7 @@ const noCameraSchema = {
     .describe('What is being opened. See the tool description.'),
 }
 
-export function displayServer(emit, emitBlade, { camera = true } = {}) {
+export function displayServer(emitBlade, { camera = true } = {}) {
   return createSdkMcpServer({
     name: 'jarvis',
     version: '1.0.0',

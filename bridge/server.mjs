@@ -28,6 +28,13 @@ import { createRemote, REMOTE_FILE } from './remote.mjs'
 import { brainMode, createHealth, createProbe, resetTime, unavailable } from './router.mjs'
 import { createLocal, localConfig } from './local.mjs'
 import { localSystemPrompt, localTools } from './local-tools.mjs'
+import { deviceServer } from './device-server.mjs'
+import { agentContext } from '../shared/agent-context.mjs'
+import { appendExchange, retainedHistory } from '../shared/conversation.mjs'
+import { INFERENCE_MAX_BYTES } from '../shared/remote-chat.mjs'
+import { recordClaudeMessage } from './claude-history.mjs'
+import { fileTrace } from './trace.mjs'
+import { createTrace, traceData } from '../shared/trace.mjs'
 import { createInbox } from './inbox.mjs'
 import { homedir, tmpdir } from 'node:os'
 import { mkdirSync, readFileSync, realpathSync } from 'node:fs'
@@ -35,7 +42,7 @@ import { readFile, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { openRemote, proxyError, vetTarget, PROXY_UA } from './net.mjs'
-import { probeUrl, renderPage } from './page.mjs'
+import { renderPage } from './page.mjs'
 import {
   builtinTools,
   checkToolUse,
@@ -246,14 +253,12 @@ const EFFORT = process.env.JARVIS_EFFORT ?? 'high'
  */
 const BRAIN_MODE = brainMode(process.env.JARVIS_BRAIN)
 const LOCAL = createLocal(localConfig())
-const LOCAL_SHELL = process.env.JARVIS_LOCAL_SHELL === '1'
+const LOCAL_SHELL = process.env.JARVIS_LOCAL_SHELL !== '0'
 const CLAUDE_HEALTH = createHealth()
 const claudeReachable = createProbe()
 /** When the usage limit lifts, as last reported by the API. */
 let rateResetAt = null
 
-/** How many earlier exchanges a brain taking over a conversation is told. */
-const RECAP_TURNS = 6
 /** Failed attempts the CLI may make on one request before the local model takes it. */
 const RETRY_PATIENCE = 2
 
@@ -347,6 +352,10 @@ const WORKSPACE = resolvePath(
   process.env.JARVIS_WORKSPACE ?? join(homedir(), '.jarvis', 'workspace'),
 )
 mkdirSync(WORKSPACE, { recursive: true })
+const TRACE_DIR = resolvePath(process.env.JARVIS_TRACE_DIR || join(WORKSPACE, '..', 'logs'))
+const TRACE = process.env.JARVIS_TRACE === '0' ? createTrace({ write: () => {} }) : fileTrace(TRACE_DIR)
+void TRACE.record('service.start', { pid: process.pid, model: MODEL, mode: BRAIN_MODE, workspace: WORKSPACE })
+console.log(`[jarvis] structured traces ${process.env.JARVIS_TRACE === '0' ? 'disabled' : `in ${TRACE_DIR}`}`)
 
 /**
  * Print each question and each finished answer in the bridge's terminal.
@@ -832,6 +841,7 @@ async function proxyRemote(req, res, cors, { kinds, maxBytes, timeoutMs, ranged 
 
   const { res: upstream } = await openRemote(target, headers, timeoutMs)
   const status = upstream.statusCode ?? 0
+  await TRACE.record('media.response', { url: asked, status, contentType: upstream.headers['content-type'] ?? '', accepted: (status === 200 || status === 206) && kinds.some((kind) => String(upstream.headers['content-type'] ?? '').toLowerCase().startsWith(kind)) })
 
   if (status !== 200 && status !== 206) {
     upstream.resume()
@@ -997,7 +1007,7 @@ async function remoteGate(req, res) {
   return true
 }
 
-const androidPcTools = pcTools({ allowWrites: ALLOW_WRITES, cwd: WORKSPACE, roots: TOOL_ROOTS })
+const androidPcTools = pcTools({ allowWrites: ALLOW_WRITES, shell: LOCAL_SHELL, cwd: WORKSPACE, roots: TOOL_ROOTS })
 const inferAndroid = createInference({ query, model: MODEL, effort: EFFORT, cwd: WORKSPACE, executable: process.env.JARVIS_CLAUDE_EXECUTABLE, host: androidPcTools.manifest })
 let inferenceRequests = 0
 
@@ -1026,6 +1036,8 @@ const handleRequest = async (req, res, viaRemote = false) => {
   }
 
   if (req.url === '/pc-tools') {
+    const logger = TRACE.child({ requestId: crypto.randomUUID(), transport: 'pc-tools' })
+    const started = Date.now()
     const json = (status, value) => {
       res.writeHead(status, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' })
       res.end(JSON.stringify(value))
@@ -1047,9 +1059,12 @@ const handleRequest = async (req, res, viaRemote = false) => {
       try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { return json(400, { error: 'Invalid JSON' }) }
       if (!input || typeof input !== 'object') return json(400, { error: 'Invalid PC tool request' })
       console.log(`[jarvis] PC tool: ${input.name}`)
+      await logger.record('tool.start', { name: input.name, arguments: input.args, client: input.trace })
       const result = await androidPcTools.run(input, controller.signal)
+      await logger.record('tool.result', { result, durationMs: Date.now() - started })
       if (!res.destroyed) return json(200, { result })
     } catch (err) {
+      await logger.record('tool.error', { error: err, cancelled: controller.signal.aborted, durationMs: Date.now() - started })
       console.warn('[jarvis] PC tool refused:', err.message)
       if (!res.destroyed) return json(403, { error: err.message })
     } finally {
@@ -1059,6 +1074,7 @@ const handleRequest = async (req, res, viaRemote = false) => {
   }
 
   if (req.url === '/inference') {
+    const logger = TRACE.child({ requestId: crypto.randomUUID(), transport: 'inference' })
     const json = (status, value) => {
       res.writeHead(status, { ...cors, 'content-type': 'application/json', 'cache-control': 'no-store' })
       res.end(JSON.stringify(value))
@@ -1075,17 +1091,20 @@ const handleRequest = async (req, res, viaRemote = false) => {
       let bytes = 0
       for await (const chunk of req) {
         bytes += chunk.length
-        if (bytes > 256 * 1024) return json(413, { error: 'Inference request too large' })
+        if (bytes > INFERENCE_MAX_BYTES) return json(413, { error: 'Inference request too large' })
         chunks.push(chunk)
       }
       let input
       try { input = JSON.parse(Buffer.concat(chunks).toString('utf8')) } catch { return json(400, { error: 'Invalid JSON' }) }
+      await logger.record('inference.start', { client: input.trace })
       console.log('[jarvis] Android inference tools:', input.tools?.map((tool) => tool.function?.name).join(', ') || '(none)')
       const last = input.messages?.at(-1)
       if (last?.role === 'tool' && /^(That failed:|There is no tool)/.test(last.content)) console.warn(`[jarvis] ${last.tool_name}: ${last.content}`)
-      const result = await inferAndroid(input, controller.signal)
+      const result = await inferAndroid(input, controller.signal, (event, data) => logger.record(event, data))
+      await logger.record('model.response', result)
       if (!res.destroyed) return json(200, result)
     } catch (err) {
+      await logger.record('model.error', { error: err, cancelled: controller.signal.aborted })
       console.error('[jarvis] Android inference:', err.message)
       if (!res.destroyed) return json(err.message === 'Invalid inference request' ? 400 : 503, { error: 'Android inference unavailable' })
     } finally {
@@ -1202,6 +1221,7 @@ const handleRequest = async (req, res, viaRemote = false) => {
       })
     } catch (err) {
       if (res.headersSent) return res.destroy()
+      await TRACE.record('media.error', { route: 'image', url: new URL(req.url, 'http://x').searchParams.get('url'), error: err, status: err.status ?? 502 })
       res.writeHead(err.status ?? 502, cors)
       return res.end(err.message ?? 'proxy failed')
     }
@@ -1652,8 +1672,13 @@ const onConnection = (socket) => {
    */
   /** The question in hand: { id, text, images, brain, spoke, fallback, cancelled, done }. */
   let current = null
+  let conversationId = crypto.randomUUID()
+  const trace = (event, { conversationId: cid = conversationId, turnId = current?.id, ...data } = {}) =>
+    TRACE.child({ conversationId: cid, turnId, brain: current?.brain }).record(event, data)
+  void trace('connection.open')
   /** Finished exchanges, whoever answered them. */
   const transcript = []
+  let completedCount = 0
   /** How much of the transcript the live Claude session has already seen. */
   let claudeSeen = 0
   /** The live Claude session, or null while there is none. */
@@ -1664,6 +1689,8 @@ const onConnection = (socket) => {
   let shownBrain = null
 
   const send = (msg) => {
+    if (msg.type === 'blade' && msg.blade) msg = { ...msg, blade: { ...msg.blade, trace: { conversationId, turnId: current?.id } } }
+    if (['blade', 'panel', 'capture', 'ui'].includes(msg.type)) void trace(`ui.${msg.type}`, { message: msg })
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(msg))
   }
 
@@ -1679,10 +1706,27 @@ const onConnection = (socket) => {
    */
   let answering = null
   const sendTurn = (msg) => {
+    if (msg.type === 'done') void trace('turn.end', { text: msg.text, costUsd: msg.costUsd })
+    if (msg.type === 'error') void trace('turn.error', { message: msg.message })
     // Once a word has been spoken the turn cannot be quietly given to the
     // other brain: the user would hear two openings to one answer.
     if (msg.type === 'text' && current) current.spoke = true
     send({ ...msg, ask: answering })
+  }
+
+  function retainTurn(turn, messages, text = '') {
+    const exchange = { id: turn.exchangeId, user: turn.text, jarvis: text, messages }
+    if (!turn.retained) {
+      completedCount++
+      turn.retained = true
+    }
+    appendExchange(transcript, exchange)
+    return transcript.find((entry) => entry.id === turn.exchangeId)
+  }
+
+  function checkpoint(turn, messages) {
+    const exchange = retainTurn(turn, messages)
+    if (exchange) send({ type: 'checkpoint', ask: turn.id, exchange })
   }
 
   /**
@@ -1836,6 +1880,7 @@ const onConnection = (socket) => {
 
   /** Whatever is answering stops: a barge-in, or a new question overtaking an old one. */
   const stopCurrentTurn = () => {
+    if (current && !current.done && !current.cancelled) void trace('turn.cancel', { reason: 'interrupt or replacement' })
     if (current) current.cancelled = true
     // The local model stops the moment its request is aborted, and whatever
     // it had left to say is discarded here — there is no tail to wait out.
@@ -1873,6 +1918,7 @@ const onConnection = (socket) => {
 
   /** Tells the interface which brain is answering, when that changes. */
   const showBrain = (kind, reason = null) => {
+    void trace('route.selected', { model: kind === 'local' ? LOCAL.model : MODEL, provider: kind, reason })
     if (shownBrain === kind) return
     const first = shownBrain === null
     shownBrain = kind
@@ -1894,6 +1940,8 @@ const onConnection = (socket) => {
     shell: LOCAL_SHELL,
     show: (blade) => send({ type: 'blade', blade }),
   })
+  const host = { ...androidPcTools.manifest, cwd: WORKSPACE }
+  const capabilityContext = agentContext({ tools: localToolset, host })
 
   /** Tools that are JARVIS keeping house, not work the user is waiting on. */
   const QUIET_LOCAL_TOOLS = new Set(['remember', 'forget', 'show'])
@@ -1910,6 +1958,8 @@ const onConnection = (socket) => {
     const abort = new AbortController()
     localAbort = abort
     const mine = () => !abort.signal.aborted && !socketClosed && answering === turn.id
+    let messages = []
+    let progressAt = 0
     try {
       const images = []
       for (const path of turn.images ?? []) {
@@ -1918,13 +1968,24 @@ const onConnection = (socket) => {
         if (info && info.size <= 6 * 1024 * 1024) images.push((await readFile(path)).toString('base64'))
       }
       const text = await LOCAL.turn(turn.text, {
+        trace: (event, data) => TRACE.child({ conversationId, turnId: turn.id, brain: 'local' }).record(event, data),
         system: localSystemPrompt({
           language: LANGUAGE,
           roots: TOOL_ROOTS,
           inbox: INBOX.dir,
           allowWrites: ALLOW_WRITES,
+          tools: localToolset, host,
         }),
-        history: transcript.slice(-RECAP_TURNS),
+        history: transcript.filter((entry) => entry.id !== turn.exchangeId),
+        observations: turn.messages?.slice(1) ?? [],
+        onMessages: (value) => { messages = value },
+        onCheckpoint: (value) => checkpoint(turn, value),
+        onProgress: () => {
+          if (mine() && Date.now() - progressAt >= 5000) {
+            progressAt = Date.now()
+            sendTurn({ type: 'progress' })
+          }
+        },
         tools: localToolset,
         images,
         signal: abort.signal,
@@ -1938,9 +1999,9 @@ const onConnection = (socket) => {
         },
       })
       if (abort.signal.aborted) return
-      transcript.push({ user: turn.text, jarvis: text })
+      const exchange = retainTurn(turn, messages, text)
       if (LOG_TALK) console.log(`[jarvis] answered (local): ${said(text)}`)
-      if (mine()) sendTurn({ type: 'done', text, costUsd: 0 })
+      if (mine()) sendTurn({ type: 'done', text, costUsd: 0, exchange })
     } catch (err) {
       if (abort.signal.aborted) return
       console.error(`[jarvis] local turn failed: ${err?.message ?? err}`)
@@ -1983,7 +2044,7 @@ const onConnection = (socket) => {
     'this conversation, which you do not otherwise remember. Carry on from it ' +
     'without mentioning it.\n' +
     exchanges
-      .map((e) => `User: ${said(e.user)}\nJARVIS: ${said(e.jarvis)}`)
+      .map((e) => e.messages?.length ? JSON.stringify(e.messages) : `User: ${e.user}\nJARVIS: ${e.jarvis}`)
       .join('\n') +
     ']\n\n'
 
@@ -1995,9 +2056,14 @@ const onConnection = (socket) => {
   }
 
   /** Send one question to whichever brain should answer it. */
-  const route = async (text, id, files) => {
-    const turn = { id, text, images: [], brain: null, spoke: false, fallback: null, cancelled: false, done: false }
+  const route = async (text, id, files, history, exchangeId) => {
+    if (!transcript.length) {
+      transcript.push(...retainedHistory(history))
+      completedCount = transcript.length
+    }
+    const turn = { id, exchangeId, text, images: [], messages: [], brain: null, spoke: false, fallback: null, cancelled: false, done: false }
     current = turn
+    await trace('turn.start', { text, files, history: transcript })
     // Files that came with the question, named by the bridge from paths it
     // has checked for itself.
     if (files?.length) {
@@ -2005,6 +2071,7 @@ const onConnection = (socket) => {
       turn.text = dropped.note + text
       turn.images = dropped.images
     }
+    turn.messages.push({ role: 'user', content: turn.text })
     const why = await localReason()
     // The checks above take a moment; a newer question, an interrupt or a
     // closed page may have overtaken this one.
@@ -2014,8 +2081,8 @@ const onConnection = (socket) => {
     turn.brain = 'claude'
     showBrain('claude')
     claude ??= startClaude()
-    const unseen = transcript.slice(claudeSeen)
-    claudeSeen = transcript.length
+    const unseen = transcript.slice(Math.max(0, claudeSeen - (completedCount - transcript.length)))
+    claudeSeen = completedCount
     claude.push(unseen.length ? recap(unseen) + turn.text : turn.text)
   }
 
@@ -2026,8 +2093,8 @@ const onConnection = (socket) => {
     // connection rather than once.
     mcpServers: {
       ...MCP_SERVERS,
+      jarvis_device: deviceServer(localToolset),
       jarvis: displayServer(
-        (panel) => send({ type: 'panel', panel }),
         (blade) => send({ type: 'blade', blade }),
         { camera: !DISABLED.has('camera') },
       ),
@@ -2064,7 +2131,12 @@ const onConnection = (socket) => {
     // Only the built-ins JARVIS uses. Everything else is not merely denied
     // but absent from the model's context. See builtinTools in policy.mjs.
     tools: builtinTools(ALLOW_WRITES),
-    hooks: { PreToolUse: [{ hooks: [enforcePolicy] }] },
+    hooks: { PreToolUse: [{ hooks: [async (input) => {
+      const verdict = await enforcePolicy(input)
+      await trace('tool.start', { provider: 'claude', name: input.tool_name, callId: input.tool_use_id,
+        arguments: input.tool_input, denied: verdict.hookSpecificOutput?.permissionDecision === 'deny' })
+      return verdict
+    }] }] },
     // No filesystem settings at all. Left to its default the SDK loads
     // ~/.claude/settings.json and settings.local.json exactly as the CLI
     // does — which on a working machine means a bypassPermissions default
@@ -2156,6 +2228,7 @@ const onConnection = (socket) => {
             deliver = resolve
           }))
         if (closed || text == null) return
+        await trace('model.input', { provider: 'claude', model: MODEL, text })
         yield {
           type: 'user',
           message: { role: 'user', content: text },
@@ -2164,9 +2237,11 @@ const onConnection = (socket) => {
       }
     }
 
+    const systemPrompt = SYSTEM_PROMPT + '\n' + capabilityContext + memoryPrompt()
+    void trace('model.context', { provider: 'claude', model: MODEL, system: systemPrompt, tools: localToolset.map(({ name, description, parameters }) => ({ name, description, parameters })) })
     const session = query({
       prompt: userMessages(),
-      options: { ...claudeOptions, systemPrompt: SYSTEM_PROMPT + memoryPrompt() },
+      options: { ...claudeOptions, systemPrompt },
     })
 
     const handle = {
@@ -2194,7 +2269,7 @@ const onConnection = (socket) => {
 
     // A new session knows nothing of what was said before it existed, so the
     // last few exchanges ride in with its first question.
-    claudeSeen = Math.max(0, transcript.length - RECAP_TURNS)
+    claudeSeen = 0
     void pump(session, handle)
     return handle
   }
@@ -2255,13 +2330,20 @@ const onConnection = (socket) => {
         // the local model — may still have messages buffered. They belong to
         // nobody now, and must not be tagged as the current question's.
         if (handle.closed) break
+        if (current?.brain === 'claude' && !current.done && recordClaudeMessage(current.messages, msg)) {
+          checkpoint(current, current.messages)
+        }
+        if (msg.type === 'assistant' && !msg.error) await trace('model.response', { provider: 'claude', content: msg.message?.content ?? msg.content })
+        if (msg.type === 'assistant' && msg.error) await trace('model.error', { provider: 'claude', error: msg.error })
+        if (msg.type === 'system' && msg.subtype === 'init') await trace('model.capabilities', { provider: 'claude', model: msg.model, tools: msg.tools, servers: msg.mcp_servers })
+        if (msg.type === 'result') await trace('model.result', { subtype: msg.subtype, errors: msg.errors, usage: msg.usage, costUsd: msg.total_cost_usd })
         if (process.env.JARVIS_DEBUG === '1') {
           console.log(
             '[msg]',
             msg.type,
             msg.event?.type ?? '',
             msg.type === 'result' ? `subtype=${msg.subtype} result=${JSON.stringify(msg.result)}` : '',
-            msg.type === 'assistant' ? JSON.stringify(msg.message?.content ?? msg.content) : '',
+            msg.type === 'assistant' ? JSON.stringify(traceData(msg.message?.content ?? msg.content)) : '',
             msg.type === 'system' && msg.subtype === 'init' ? JSON.stringify(msg.mcp_servers) : '',
           )
         }
@@ -2342,6 +2424,7 @@ const onConnection = (socket) => {
             if (!Array.isArray(blocks)) break
             for (const block of blocks) {
               if (block?.type === 'tool_result') {
+                await trace('tool.result', { provider: 'claude', callId: block.tool_use_id, result: block.content, failed: block.is_error === true })
                 settleTool(block.tool_use_id, block.is_error === true)
               }
             }
@@ -2375,14 +2458,15 @@ const onConnection = (socket) => {
               turn.done = true
               // An answer is the proof that Claude is back.
               if (!turn.fallback) CLAUDE_HEALTH.markUp()
-              transcript.push({ user: turn.text, jarvis: msg.result ?? '' })
-              if (transcript.length > 40) transcript.splice(0, transcript.length - 40)
-              claudeSeen = transcript.length
+              if (turn.messages.at(-1)?.role !== 'assistant') turn.messages.push({ role: 'assistant', content: msg.result ?? '' })
+              const exchange = retainTurn(turn, turn.messages, msg.result ?? '')
+              claudeSeen = completedCount
               if (LOG_TALK) console.log(`[jarvis] answered: ${said(msg.result)}`)
               sendTurn({
                 type: 'done',
                 text: msg.result ?? '',
                 costUsd: msg.total_cost_usd ?? null,
+                exchange,
               })
             } else if (cancelled) {
               turn.done = true
@@ -2472,6 +2556,7 @@ const onConnection = (socket) => {
     }
 
     if (msg.type === 'ask' && typeof msg.text === 'string') {
+      if (typeof msg.conversationId === 'string' && /^[\w-]{1,80}$/.test(msg.conversationId)) conversationId = msg.conversationId
       /**
        * Queued behind any interrupt that is still settling.
        *
@@ -2493,6 +2578,7 @@ const onConnection = (socket) => {
       const text = msg.text
       if (LOG_TALK) console.log(`[jarvis] asked: ${said(text)}`)
       const id = typeof msg.id === 'string' ? msg.id : null
+      const exchangeId = typeof msg.exchangeId === 'string' && /^[\w-]{1,80}$/.test(msg.exchangeId) ? msg.exchangeId : crypto.randomUUID()
       // Files dropped on the interface since the last question. Only paths;
       // the bridge checks each one is really in its inbox before naming it.
       const files = Array.isArray(msg.files)
@@ -2500,7 +2586,7 @@ const onConnection = (socket) => {
         : []
       void settling.then(() => {
         answering = id
-        void route(text, id, files).catch((err) => {
+        void route(text, id, files, msg.history, exchangeId).catch((err) => {
           console.error('[jarvis] could not route the question:', err)
           if (answering === id) sendTurn({ type: 'error', message: 'The question could not be delivered.' })
         })
@@ -2517,11 +2603,15 @@ const onConnection = (socket) => {
     }
 
     if (msg.type === 'interrupt') stopCurrentTurn()
+    if (msg.type === 'trace' && /^image\.(loaded|error)$/.test(msg.event ?? '') && JSON.stringify(msg.data ?? {}).length <= 32768) {
+      void trace(msg.event, { origin: 'viewer', ...msg.data, conversationId: msg.data?.conversationId ?? msg.conversationId ?? conversationId })
+    }
   })
 
   socket.on('close', () => {
     console.log('[jarvis] client disconnected')
     socketClosed = true
+    void trace('connection.close')
     localAbort?.abort()
     claude?.close()
   })

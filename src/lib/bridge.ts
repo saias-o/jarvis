@@ -1,7 +1,8 @@
 import { accessToken } from './bridgeAuth'
 import type { AskHandlers } from './anthropic'
-import type { Blade, BrainInfo, Panel } from '../store'
+import { useStore, type Blade, type BrainInfo } from '../store'
 import { BRIDGE_IS_HOST, BRIDGE_WS_URL } from '../config'
+import { appendExchange, retainedHistory, UNCONFIRMED_RESULT, type Exchange } from '../../shared/conversation.mjs'
 
 /**
  * Client for the local bridge (see bridge/server.mjs).
@@ -11,10 +12,8 @@ import { BRIDGE_IS_HOST, BRIDGE_WS_URL } from '../config'
  * machine, so every MCP server in your Claude Code config is in play.
  *
  * The socket is the session. The bridge holds one Claude Agent SDK query per
- * connection and the whole conversation lives inside it, so a dropped socket
- * silently wipes JARVIS's memory of the exchange while the transcript on screen
- * still shows it. That is why the reconnect below is loud rather than
- * invisible: `watchConnection` exists so the HUD can say so.
+ * connection. Completed exchanges and tool observations also stay in this
+ * page's session storage and restore a new bridge connection when needed.
  */
 
 /** Anything the bridge sends. Deliberately loose — a frame from a future
@@ -25,7 +24,6 @@ type Frame = {
   name?: string
   text?: string
   message?: string
-  panel?: Panel
   blade?: Blade
   op?: string
   args?: unknown
@@ -38,10 +36,50 @@ type Frame = {
   brain?: string
   model?: string
   servers?: Array<string | { name?: string }>
+  exchange?: Exchange
 }
 
 /** Every question gets an id so its answer can be told from anyone else's. */
 let askSeq = 0
+// Kept by this page across socket drops and bridge restarts. Re-sent only as
+// historical data; the server's current system prompt and permissions win.
+let conversation: Exchange[] = []
+let conversationUrl = ''
+const historyKey = () => `jarvis-conversation:${BRIDGE_WS_URL}`
+const conversationIds = new Map<string, string>()
+export function conversationId(): string {
+  const key = `${historyKey()}:id`
+  if (!conversationIds.has(key)) {
+    let id = crypto.randomUUID() as string
+    try { id = sessionStorage.getItem(key) || id; sessionStorage.setItem(key, id) } catch { /* private storage */ }
+    conversationIds.set(key, id)
+  }
+  return conversationIds.get(key)!
+}
+
+export async function reportTrace(event: string, data: unknown): Promise<void> {
+  const ws = await connect()
+  ws.send(JSON.stringify({ type: 'trace', event, data, conversationId: conversationId() }))
+}
+const saveConversation = () => {
+  try { sessionStorage.setItem(historyKey(), JSON.stringify(conversation)) } catch { /* storage may be unavailable */ }
+}
+const restoreConversation = () => {
+  if (conversationUrl === BRIDGE_WS_URL) return
+  conversationUrl = BRIDGE_WS_URL
+  try { conversation = retainedHistory(JSON.parse(sessionStorage.getItem(historyKey()) ?? '[]')) }
+  catch { conversation = [] }
+  if (!conversation.length) {
+    // Upgrade an already open page from its visible, completed exchanges.
+    let user: string | undefined
+    for (const turn of useStore.getState().turns) {
+      if (turn.role === 'user') user = turn.text
+      else if (user !== undefined) { conversation.push({ user, jarvis: turn.text }); user = undefined }
+    }
+    conversation = retainedHistory(conversation)
+    saveConversation()
+  }
+}
 
 let socket: WebSocket | null = null
 let connecting: Promise<WebSocket> | null = null
@@ -55,13 +93,6 @@ export const bridgeServers = () => servers
 let onServers: ((s: string[]) => void) | null = null
 export function watchServers(fn: (s: string[]) => void) {
   onServers = fn
-}
-
-/** Panels arrive out of band — they're pushed while a turn is in flight,
- *  not returned by it. */
-let onPanel: ((panel: Panel) => void) | null = null
-export function watchPanels(fn: (panel: Panel) => void) {
-  onPanel = fn
 }
 
 /**
@@ -114,9 +145,8 @@ export function watchBrain(fn: (brain: BrainInfo) => void) {
  * Connection state, for the UI.
  *
  *   'open'        — first connection of the page.
- *   'lost'        — the socket died. The agent session died with it, so
- *                   everything said so far is gone as far as JARVIS knows.
- *   'reconnected' — we're back, on a fresh session with no memory of the above.
+ *   'lost'        — the socket died; completed exchanges stay in this page.
+ *   'reconnected' — a fresh connection will restore those exchanges.
  */
 export type ConnectionState = 'open' | 'lost' | 'reconnected'
 let onConnection: ((state: ConnectionState) => void) | null = null
@@ -196,8 +226,10 @@ function dispatch(ws: WebSocket) {
         .filter(Boolean)
       onServers?.(servers)
       firstReady.resolve()
-    } else if (msg.type === 'panel' && msg.panel) {
-      onPanel?.(msg.panel)
+    } else if (msg.type === 'checkpoint' && msg.exchange?.id && socket === ws) {
+      restoreConversation()
+      appendExchange(conversation, msg.exchange)
+      saveConversation()
     } else if (msg.type === 'blade' && msg.blade) {
       onBlade?.(msg.blade)
     } else if (msg.type === 'capture' && msg.id) {
@@ -370,6 +402,7 @@ export async function ask(
    * turn's caller sees its own `stale()` check and stands down quietly.
    */
   if (pending) cancel()
+  restoreConversation()
 
   // Claim the slot in this same tick. connect() below awaits, and two calls
   // made before it settles would otherwise both sail past the check above.
@@ -395,11 +428,13 @@ export async function ask(
   }
 
   const id = `a${++askSeq}`
+  const exchangeId = crypto.randomUUID()
   const tools: string[] = []
   let text = ''
 
   return new Promise((resolve, reject) => {
     let done = false
+    let sent = false
     let timer = 0
 
     const cleanup = () => {
@@ -419,8 +454,12 @@ export async function ask(
       resolve({ text: (text || fallback).trim(), tools })
     }
 
-    const fail = (err: Error) => {
+    const fail = (err: Error, disconnected = false) => {
       if (done) return
+      if (disconnected && sent && !conversation.some((entry) => entry.id === exchangeId)) {
+        appendExchange(conversation, { id: exchangeId, user: prompt, jarvis: UNCONFIRMED_RESULT })
+        saveConversation()
+      }
       cleanup()
       reject(err)
     }
@@ -428,7 +467,7 @@ export async function ask(
     const arm = () => {
       clearTimeout(timer)
       timer = window.setTimeout(() => {
-        fail(new Error('The bridge went quiet — that turn was lost, sir.'))
+        fail(new Error('The bridge went quiet before confirming the end of this turn.'), true)
       }, IDLE_TIMEOUT_MS)
     }
 
@@ -471,6 +510,8 @@ export async function ask(
             break
 
           case 'done':
+            appendExchange(conversation, msg.exchange ?? { user: prompt, jarvis: msg.text ?? text })
+            saveConversation()
             finish(msg.text ?? '')
             break
 
@@ -484,10 +525,10 @@ export async function ask(
     }
 
     const onClose = () => {
-      fail(new Error('The bridge disconnected mid-answer — that session is gone.'))
+      fail(new Error('The bridge disconnected mid-answer.'), true)
     }
     const onError = () => {
-      fail(new Error('The connection to the bridge failed.'))
+      fail(new Error('The connection to the bridge failed.'), true)
     }
 
     pending = { finish }
@@ -497,7 +538,8 @@ export async function ask(
     arm()
 
     try {
-      ws.send(JSON.stringify({ type: 'ask', text: prompt, id, ...(files.length ? { files } : {}) }))
+      ws.send(JSON.stringify({ type: 'ask', text: prompt, id, exchangeId, conversationId: conversationId(), history: conversation, ...(files.length ? { files } : {}) }))
+      sent = true
     } catch (err) {
       // The socket can go into CLOSING between connect() resolving and here.
       fail(err instanceof Error ? err : new Error(String(err)))
@@ -518,11 +560,6 @@ export function cancel(): void {
     socket.send(JSON.stringify({ type: 'interrupt' }))
   }
   pending?.finish()
-}
-
-/** The older name for `cancel()`. */
-export function interrupt(): void {
-  cancel()
 }
 
 /** `mcp__higgsfield__generate_image` -> `higgsfield · generate image` */

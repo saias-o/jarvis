@@ -5,6 +5,22 @@ import { remoteChat } from '../shared/remote-chat.mjs'
 import { androidTools } from '../shared/android-agent.mjs'
 import { agentTurn } from '../shared/agent-loop.mjs'
 
+test('the remote inference budget includes tools, history, diagnostics and UTF-8 bytes', async () => {
+  const current = [{ role: 'user', content: 'follow up' }, { role: 'assistant', content: '', tool_calls: [] },
+    { role: 'tool', content: 'verified result', tool_name: 'read_file' }]
+  const system = { role: 'system', content: 'instructions' }
+  let sent
+  const fetcher = async (_url, { body }) => {
+    assert.ok(Buffer.byteLength(body) <= 256 * 1024)
+    sent = JSON.parse(body)
+    return Response.json({ message: { content: 'done', tool_calls: [] } })
+  }
+  await remoteChat(fetcher, 'https://pc.test', [system, { role: 'user', content: 'old' },
+    { role: 'assistant', content: 'é'.repeat(130_000) }, ...current], [{ description: 't'.repeat(4000) }], undefined, { turnId: 'a' }).next()
+  assert.deepEqual(sent.messages, [system, ...current])
+  await assert.rejects(remoteChat(fetcher, 'https://pc.test', [system, { role: 'user', content: 'é'.repeat(135_000) }], []).next(), /capacité/)
+})
+
 test('PC inference lists Android Download using the phone tools and retains phone attachments', async () => {
   const executed = []
   let shown

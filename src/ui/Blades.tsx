@@ -244,11 +244,11 @@ const Body = memo(function Body({ blade, previous, next }: { blade: Blade; previ
   }
 
   if (blade.kind === 'image' && blade.url) {
-    return <ImageViewer key={blade.url} sources={[blade.url]} title={blade.title} previous={previous} next={next} />
+    return <ImageViewer key={blade.url} sources={[blade.url]} title={blade.title} previous={previous} next={next} traceContext={blade.trace} />
   }
 
   if (blade.kind === 'gallery') {
-    return <ImageViewer sources={blade.images ?? []} title={blade.title} />
+    return <ImageViewer sources={blade.images ?? []} title={blade.title} traceContext={blade.trace} />
   }
 
   if (blade.kind === 'markup' && blade.html) {

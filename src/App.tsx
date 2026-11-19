@@ -28,9 +28,8 @@ import { forTool, attention } from './lib/fillers'
 import {
   ask,
   warm,
-  interrupt,
+  cancel,
   watchServers,
-  watchPanels,
   watchBlades,
   watchCapture,
   watchUi,
@@ -145,9 +144,8 @@ export default function App() {
 
     clearIdle()
     const s = store.getState()
-    // Last turn's panels and blades go now, before the new answer starts
+    // Last turn's blades go now, before the new answer starts
     // putting its own up. Anything the model marked sticky survives.
-    s.clearPanels()
     s.clearBlades()
     s.setCaption('')
     // Files handed over since the last question go with this one, whether it
@@ -305,7 +303,7 @@ export default function App() {
       // Abandon the answer in flight. The turn counter moves in respond()'s
       // replacement; bumping it here covers the case where nothing replaces it.
       turn.current++
-      interrupt()
+      cancel()
       store.getState().setActiveTool(null)
       music.working(false)
       sfx.duck(false)
@@ -449,7 +447,6 @@ export default function App() {
     s.setPhase('boot')
 
     watchServers((servers) => store.getState().setConnected(servers))
-    watchPanels((panel) => store.getState().pushPanel(panel))
     watchBlades((blade) => store.getState().pushBlade(blade))
 
     /**
@@ -546,7 +543,7 @@ export default function App() {
       } else if (state === 'reconnected') {
         store
           .getState()
-          .setError('Bridge reconnected. The previous conversation was not kept.')
+          .setError('Bridge reconnected.')
       }
     })
     const warming = warm().catch((err: Error) => s.setError(err.message))

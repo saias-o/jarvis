@@ -155,7 +155,7 @@ export function decideTool(name, allowWrites = false) {
 
     // His own memory file. It writes, but only one file of short facts the
     // user can read and edit, so it is not held back behind allowWrites.
-    if (server === 'jarvis_memory') return true
+    if (server === 'jarvis_memory' || server === 'jarvis_device') return true
 
     const tool = mcpToolOf(name)
     if (EFFECTFUL_VERB.test(tool) && !VETO_EXEMPT.has(`${server}__${tool}`)) {

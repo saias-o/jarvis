@@ -1,6 +1,26 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { agentTurn } from '../shared/agent-loop.mjs'
+import { deviceTools } from '../shared/tools.mjs'
+
+test('invalid model calls cannot invoke the write primitive on either device', async () => {
+  let step = 0
+  const writes = []
+  const tools = deviceTools({ write: (path, content) => { writes.push([path, content]) } })
+  const args = ['invalid JSON', [], { path: 'a' }, { path: 'a', content: '' }]
+  await agentTurn('write', {
+    tools,
+    chat: async function* (messages) {
+      if (step++ === 0) {
+        yield { message: { tool_calls: args.map((arguments_) => ({ function: { name: 'write_file', arguments: arguments_ } })) } }
+      } else {
+        assert.equal(messages.filter((m) => m.role === 'tool' && m.content.startsWith('That failed:')).length, 3)
+        yield { message: { content: 'Done' } }
+      }
+    },
+  })
+  assert.deepEqual(writes, [['a', '']])
+})
 
 test('aborting a streamed answer prevents queued tool side effects', async () => {
   const abort = new AbortController()
@@ -63,4 +83,23 @@ test('existing history retains completed tool observations so a follow-up uses t
   assert.deepEqual(moved, { from: pcPath, to: 'C:/Pictures/file.txt' })
   assert.equal(next[0].content, 'Range-le dans Images.')
   assert.ok(!next.some((m) => m.tool_name === 'upload_to_pc'))
+})
+
+test('native reasoning stays within the current tool cycle and out of saved conversation', async () => {
+  let step = 0, saved
+  await agentTurn('Read the reference.', {
+    tools: [{ name: 'read_file', description: '', parameters: {}, run: () => 'REFERENCE' }],
+    onMessages: (messages) => { saved = messages },
+    chat: async function* (messages) {
+      if (step++ === 0) {
+        yield { message: { thinking: 'native tool reasoning' } }
+        yield { message: { tool_calls: [{ function: { name: 'read_file', arguments: {} } }] } }
+      } else {
+        assert.equal(messages.at(-2).thinking, 'native tool reasoning')
+        assert.equal(messages.at(-1).content, 'REFERENCE')
+        yield { message: { content: 'REFERENCE' } }
+      }
+    },
+  })
+  assert.ok(saved.every((message) => !('thinking' in message)))
 })

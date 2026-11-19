@@ -950,4 +950,3 @@ export function peaceScroll(): number | null {
   return hand.y - peaceFrom.y
 }
 
-export const handsRunning = () => running

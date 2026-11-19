@@ -17,6 +17,7 @@
 import { spawn } from 'node:child_process'
 import process from 'node:process'
 import { cpSync, existsSync, mkdirSync } from 'node:fs'
+import { startLocalRuntime } from './local-runtime.mjs'
 
 /**
  * Put MediaPipe's WebAssembly where the page can actually load it.
@@ -173,6 +174,9 @@ if (process.argv.includes('--remote')) {
       : `  Access code, asked once per device:         ${prettyCode(loadSecrets().code)}\n`) +
     '  This computer is kept awake while JARVIS runs (--allow-sleep to opt out).\n'
 }
+
+const localRuntime = await startLocalRuntime()
+if (localRuntime) children.push(localRuntime)
 
 console.log('\nJ.A.R.V.I.S. starting — the brain and the face.\n')
 run('bridge', 'node', ['bridge/server.mjs'], '36', bridgeEnv)

@@ -266,16 +266,25 @@ lapsed, the service down. It is optional: without it nothing changes.
 2. Start JARVIS as usual. The bridge prints
    `[jarvis] local model gemma4:e2b ready — takes over when Claude cannot answer`.
 
+The launcher reuses an Ollama that is already running. Otherwise it starts an
+installed `ollama` automatically (including the standard Windows installation
+or a portable copy in `.tools/ollama/`) and stops its own process with JARVIS.
+`JARVIS_OLLAMA_EXECUTABLE` can name another executable. Models must be pulled
+once before use; startup does not download them.
+
 From then on a question Claude cannot take is answered by the local model
 instead, before anything has been said, so you ask once and hear one answer.
 The interface shows `LOCAL BRAIN` and why for as long as it lasts, and Claude
 is tried again by itself a little later. The two brains share the conversation
 — each is told what the other answered — and the same long-term memory.
 
-The stand-in is honest about being smaller. It has the files on this machine
-(the same folders, under the same rules, as Claude's file tools), the memory,
-and the display; it has no web, no browser, no mailbox and no MCP servers, and
-says so when asked for one. `JARVIS_LOCAL_MODEL` names a larger model on a
+The device catalogue is shared by Claude and the local model: files, memory,
+display, web search, page reading and the PC shell when writes are enabled.
+Both receive the real device folders, permissions and completed tool results.
+The page retains completed conversation records across a bridge restart or
+socket reconnection; each model's context window bounds what is sent.
+Claude's account connectors still require the Claude service to be available.
+`JARVIS_LOCAL_MODEL` names a larger model on a
 machine that can carry it, `JARVIS_LOCAL_URL` can point at another computer's
 Ollama, and `JARVIS_BRAIN=local` keeps everything on the machine.
 
@@ -369,7 +378,7 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_LOCAL_URL` | `http://127.0.0.1:11434` | Where Ollama listens; several addresses, comma separated, are tried in order |
 | `JARVIS_LOCAL_CTX` | `8192` | Context window given to the local model, in tokens |
 | `JARVIS_LOCAL_KEEP_ALIVE` | `30m` | How long Ollama keeps the model loaded after an answer |
-| `JARVIS_LOCAL_SHELL` | off | `1` gives the local model a shell too (with writes on) |
+| `JARVIS_LOCAL_SHELL` | on | The device catalogue includes the PC shell when writes are on; `0` explicitly disables it |
 | `JARVIS_INBOX` | `<workspace>/inbox` | Where files handed to JARVIS are stored |
 | `JARVIS_UPLOAD_MAX_MB` | `1024` | Largest file accepted |
 | `JARVIS_ALLOW_WRITES` | off | `1` allows effectful tools (see below) |
@@ -477,6 +486,29 @@ not forward it.
 ---
 
 ## Tests
+
+Structured diagnostics are enabled by default. The PC writes rotating
+`jarvis-trace-*.jsonl` files in `~/.jarvis/logs` (or `JARVIS_TRACE_DIR`). Each
+record includes a timestamp, process session, event and conversation/turn or
+request identifiers. The journal records user messages and retained history,
+actual model input and available tools, model responses, tool arguments and
+outcomes, policy denials, fallback decisions, interruptions and errors. Image
+events include the requested URL, upstream HTTP status and content type, and
+the viewer's load/error result. Browser errors require the updated interface.
+
+`shared/trace.mjs` applies the same format and masking on Android and PC.
+Android stores its traces in private app storage under `files/traces`, including
+when disconnected; Android requests carry their conversation/turn IDs to the
+PC. The optional browser-direct API mode stores records in IndexedDB
+`jarvis-diagnostics`. Android logging requires an APK built from these sources.
+
+Retention is approximately 100 MiB (10 files of 10 MiB); older records are
+removed. Recognized secret fields/tokens are masked, binary media and internal
+reasoning are omitted, and individual strings above 256 Ki characters carry an
+explicit truncation marker. Conversations and file/tool text remain private
+data: review traces before sharing them. `JARVIS_TRACE=0` disables PC traces;
+the separate `JARVIS_DEBUG` and `JARVIS_LOG_TALK` console switches remain optional.
+SDK transcripts controlled by `JARVIS_KEEP_TRANSCRIPTS` are independent.
 
 `npm test` runs the bridge's tests with Node's built-in runner. They cover the
 network binding, the tool policy, the MCP server allowlist, the remote port and

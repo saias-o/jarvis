@@ -155,9 +155,6 @@ export function releaseCamera(): void {
   diag.open = false
 }
 
-export const cameraLive = () => Boolean(video && stream)
-export const cameraStream = () => stream
-
 /* -------------------------------------------------------------------- frames */
 
 function drawTo(canvas: HTMLCanvasElement, w: number, h: number) {

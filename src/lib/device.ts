@@ -1,23 +1,26 @@
 import { agentTurn, type ChatMessage, type ChatChunk } from '../../shared/agent-loop.mjs'
-import { androidTools } from '../../shared/android-agent.mjs'
+import { androidCatalogue, androidChat, androidTools, type AndroidRoute } from '../../shared/android-agent.mjs'
 import { remoteChat } from '../../shared/remote-chat.mjs'
 import { pcTools } from '../../shared/pc-agent.mjs'
 import { accessToken, bridgeFetch } from './bridgeAuth'
-import { BRIDGE_HTTP_URL } from '../config'
-import { boundedChat, LOCAL_CONTEXT_BYTES } from '../../shared/context-window.mjs'
+import { LOCAL_CONTEXT_BYTES } from '../../shared/context-window.mjs'
 import { JarvisFiles, JarvisLlm, JarvisModels } from './android'
 import { readDeviceSettings } from './deviceSettings'
 import { CapacitorHttp } from '@capacitor/core'
 import { webImage, type WebHttp } from '../../shared/web-tools.mjs'
+import { appendExchange } from '../../shared/conversation.mjs'
 import type { AskHandlers } from './anthropic'
 import { useStore } from '../store'
+import { diagnostics } from './trace'
+import type { Trace } from '../../shared/trace.mjs'
 
 let active: AbortController | null = null
 let settled: Promise<unknown> = Promise.resolve()
 const history: Array<{ user: string; jarvis: string; messages: ChatMessage[] }> = []
 
-async function* nativeChat(messages: ChatMessage[], tools: unknown[], signal?: AbortSignal): AsyncGenerator<ChatChunk> {
+async function* nativeChat(messages: ChatMessage[], tools: unknown[], signal?: AbortSignal, trace?: Trace): AsyncGenerator<ChatChunk> {
   signal?.throwIfAborted()
+  await trace?.('model.input', { provider: 'android', messages, tools })
   const id = crypto.randomUUID()
   const queue: ChatChunk[] = []
   let done = false
@@ -45,9 +48,6 @@ async function* nativeChat(messages: ChatMessage[], tools: unknown[], signal?: A
   }
 }
 
-const chat = (messages: ChatMessage[], tools: unknown[], signal?: AbortSignal) =>
-  boundedChat(nativeChat, messages, tools, signal)
-
 
 export async function warm(): Promise<void> {
   const state = await JarvisLlm.status()
@@ -57,15 +57,38 @@ export async function warm(): Promise<void> {
   await JarvisLlm.load({ modelPath: model.path, backend: readDeviceSettings().backend })
 }
 
-export async function ask(prompt: string, handlers: AskHandlers, files: string[] = [], inference: 'device' | 'pc' = 'device'): Promise<{ text: string; tools: string[] }> {
+export async function ask(prompt: string, handlers: AskHandlers, files: string[], { inference, pcUrl }: AndroidRoute): Promise<{ text: string; tools: string[] }> {
   cancel()
   await settled.catch(() => {})
   const controller = new AbortController()
   active = controller
+  const context = { conversationId: diagnosticsId, turnId: crypto.randomUUID() }
+  const logger = diagnostics.child(context)
+  const trace = (event: string, data?: Record<string, unknown>) => logger.record(event, data)
   const operation = (async () => {
+    await trace('turn.start', { text: prompt, files, history, inference })
     if (inference === 'device') await warm()
     controller.signal.throwIfAborted()
-    const pcUrl = BRIDGE_HTTP_URL
+    let hostOnline = Boolean(pcUrl)
+    // The model and the devices are chosen apart: whichever model thinks, PC
+    // tools go to the PC that serves them and phone tools stay on the phone.
+    const onPhone = () => model.source() === 'device'
+    const fetchPc = (input: string, init?: RequestInit) => bridgeFetch(input, init, pcUrl!)
+    const discover = async () => {
+      try {
+        const found = await pcTools(fetchPc, pcUrl!, JarvisFiles, () => accessToken(pcUrl!),
+          AbortSignal.any([controller.signal, AbortSignal.timeout(3500)]), context, onPhone)
+        hostOnline = true
+        return found
+      } catch (err) { hostOnline = false; throw err }
+    }
+    let pc: Awaited<ReturnType<typeof pcTools>> = { tools: [], system: '' }
+    if (pcUrl) {
+      try { pc = await discover() }
+      catch (err) {
+        if (controller.signal.aborted || readDeviceSettings().mode === 'pc') throw err
+      }
+    }
     // Native HTTP: the WebView's own fetch is bound by CORS. The web tools
     // follow redirects themselves so that every hop is vetted.
     const http: WebHttp = ({ binary, ...request }) => CapacitorHttp.request({
@@ -76,70 +99,54 @@ export async function ask(prompt: string, handlers: AskHandlers, files: string[]
         // The page may only load images from the PC bridge or from its own
         // data. Without the PC, a picture from the web is fetched natively; a
         // file stored on the PC stays out of reach.
-        if (blade.kind === 'image' && inference !== 'pc') {
+        if (blade.kind === 'image' && !hostOnline) {
           if (!/^https?:\/\//i.test(blade.url ?? '')) throw new Error('Connect the PC to show a file stored on the PC')
           blade = { ...blade, url: await webImage(http, blade.url!, { signal: controller.signal }) }
         }
-        useStore.getState().pushBlade(blade)
+        useStore.getState().pushBlade({ ...blade, trace: context })
       },
       http,
       // On-device Gemma has a 4,096-token window; a PC model reads far more.
-      context: inference === 'pc' ? undefined : LOCAL_CONTEXT_BYTES,
+      context: LOCAL_CONTEXT_BYTES - new TextEncoder().encode(pc.system).length - (pc.tools.length ? 400 : 0),
+      smallContext: onPhone,
     })
-    // The endpoint executes the PC's existing file tools under its own policy.
-    // Keep both sets in the same loop, so the LLM chooses the device and steps.
-    const pcToken = accessToken()
-    let pc: { tools: typeof phone.tools; system: string } = { tools: [], system: '' }
-    if (inference === 'pc') {
-      try { pc = await pcTools(bridgeFetch, pcUrl, JarvisFiles, () => pcToken, AbortSignal.any([controller.signal, AbortSignal.timeout(5000)])) }
-      catch (err) {
-        if (controller.signal.aborted || readDeviceSettings().mode !== 'auto') throw err
-        pc.system = 'Les outils du PC sont actuellement injoignables ; seuls les outils Android sont disponibles pour ce tour.'
-      }
-    }
-    const tools = [...phone.tools, ...pc.tools]
-    const system = [phone.system, pc.system].filter(Boolean).join('\n\n')
+    const catalogue = androidCatalogue(phone, pc)
+    const { tools, system } = catalogue
     const used: string[] = []
+    const model = androidChat({
+      inference: pcUrl ? inference : 'device', catalogue, discover,
+      remote: (messages, specs, signal) => remoteChat(fetchPc, pcUrl!, messages, specs, signal, context),
+      local: (messages, specs, signal) => nativeChat(messages, specs, signal, trace),
+      canFallback: () => readDeviceSettings().mode === 'auto',
+      async onFallback(reason) {
+        await trace('route.selected', { provider: 'device', reason })
+        await warm()
+        useStore.getState().setBrain({ kind: 'local', model: 'Gemma embarqué', reason: 'Android' })
+      },
+    })
     useStore.getState().setBrain(inference === 'device' ? { kind: 'local', model: 'Gemma embarqué', reason: 'Android' } : { kind: 'claude', model: 'PC · outils Android et PC', reason: 'Android' })
-    let source = inference
-    async function* modelChat(messages: ChatMessage[], specs: unknown[], signal?: AbortSignal): AsyncGenerator<ChatChunk> {
-      if (source === 'pc') {
-        let emitted = false
-        try {
-          for await (const chunk of remoteChat(bridgeFetch, pcUrl, messages, specs, signal)) { emitted = true; yield chunk }
-          return
-        } catch (err) {
-          if (emitted || signal?.aborted || readDeviceSettings().mode !== 'auto') throw err
-          // Continue the same loop with completed tool results, never replay a turn.
-          source = 'device'
-          await warm()
-          signal?.throwIfAborted()
-          useStore.getState().setBrain({ kind: 'local', model: 'Gemma embarqué', reason: 'Android' })
-        }
-      }
-      // A PC that went offline cannot execute its tools. Keep completed results
-      // in the conversation, but leave Gemma its original, small Android schema.
-      const phoneNames = new Set(phone.tools.map((tool) => tool.name))
-      yield* chat(messages.map((message) => message.role === 'system'
-        ? { ...message, content: `${phone.system}${inference === 'pc' ? '\nLe PC est injoignable ; seuls les outils Android sont disponibles. Ne répète pas les actions déjà terminées.' : ''}` }
-        : message), specs.filter((spec) => phoneNames.has((spec as { function: { name: string } }).function.name)), signal)
-    }
+    await trace('route.selected', { provider: model.source() })
     const question = files.length ? `${prompt}\nPièces jointes (chemins, données) : ${JSON.stringify(files)}` : prompt
     let turnMessages: ChatMessage[] = []
     const text = await agentTurn(question, {
-      chat: modelChat,
-      system, tools, history: history.slice(-6), signal: controller.signal,
-      maxSteps: inference === 'pc' ? 12 : 6,
+      chat: model.chat,
+      system, tools, history, signal: controller.signal,
+      trace,
+      maxSteps: inference === 'pc' || pc.tools.length ? 12 : 6,
       onMessages: (messages) => { turnMessages = messages },
+      onCheckpoint: (messages) => { appendExchange(history, { id: context.turnId, user: question, jarvis: '', messages }) },
       onText: handlers.onText, onTool: (name) => { used.push(name); handlers.onTool(name) },
     })
-    history.push({ user: question, jarvis: text, messages: turnMessages })
-    if (history.length > 6) history.splice(0, history.length - 6)
+    appendExchange(history, { id: context.turnId, user: question, jarvis: text, messages: turnMessages })
+    await trace('turn.end', { text, tools: used })
     return { text, tools: used }
   })()
   settled = operation
   try { return await operation }
+  catch (error) { await trace(controller.signal.aborted ? 'turn.cancel' : 'turn.error', { error }); throw error }
   finally { if (active === controller) active = null }
 }
+
+const diagnosticsId = crypto.randomUUID()
 
 export function cancel(): void { active?.abort(); if (active) void JarvisLlm.cancel() }

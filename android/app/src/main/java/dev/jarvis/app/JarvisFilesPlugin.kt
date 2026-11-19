@@ -20,6 +20,30 @@ class JarvisFilesPlugin : Plugin() {
     private val shared get() = Environment.getExternalStorageDirectory().canonicalFile
     private val inbox get() = File(context.filesDir, "inbox").apply { mkdirs() }
     private val memory get() = File(context.filesDir, "memory.md")
+    private var traceFile: File? = null
+
+    @PluginMethod fun appendTrace(call: PluginCall) {
+        scope.launch {
+            try {
+                val line = call.getString("line") ?: error("Missing trace line")
+                val bytes = line.toByteArray(Charsets.UTF_8)
+                val maxBytes = (call.getInt("maxBytes") ?: 10485760).coerceIn(1024, 10485760)
+                val maxFiles = (call.getInt("maxFiles") ?: 10).coerceIn(1, 10)
+                require(bytes.size <= 4 * 1024 * 1024 && line.endsWith("\n")) { "Invalid trace line" }
+                val path = synchronized(this@JarvisFilesPlugin) {
+                    val dir = File(context.filesDir, "traces").apply { mkdirs() }
+                    if (traceFile == null || traceFile!!.length() + bytes.size > maxBytes) {
+                        dir.listFiles().orEmpty().filter { it.name.startsWith("jarvis-trace-") && it.extension == "jsonl" }
+                            .sortedByDescending { it.lastModified() }.drop(maxFiles - 1).forEach { it.delete() }
+                        traceFile = File(dir, "jarvis-trace-${System.currentTimeMillis()}-${java.util.UUID.randomUUID()}.jsonl")
+                    }
+                    traceFile!!.appendBytes(bytes)
+                    traceFile!!.path
+                }
+                call.resolve(JSObject().put("path", path))
+            } catch (e: Exception) { call.reject(e.message ?: "Trace write failed", e) }
+        }
+    }
 
     private fun vet(raw: String): File {
         require(raw.isNotBlank()) { "Missing path" }

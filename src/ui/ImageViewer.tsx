@@ -4,12 +4,14 @@ import { mediaUrl } from '../lib/mediaUrl'
 import { constrainView, FIT_VIEW, fitImage, MAX_IMAGE_ZOOM, zoomImage, type ImageSize, type ImageView } from '../lib/imageViewport'
 import { ViewerIcon } from './ViewerIcon'
 import { viewerLabels as t } from './viewerLabels'
+import { diagnostics } from '../lib/trace'
 
 type Point = { x: number; y: number }
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y)
 const midpoint = (a: Point, b: Point) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
 
-function ImageStage({ src, title, previous, next }: { src: string; title: string; previous?: () => void; next?: () => void }) {
+type TraceContext = { conversationId: string; turnId?: string }
+function ImageStage({ src, title, previous, next, traceContext }: { src: string; title: string; previous?: () => void; next?: () => void; traceContext?: TraceContext }) {
   const stage = useRef<HTMLDivElement>(null)
   const [natural, setNatural] = useState<ImageSize>({ width: 0, height: 0 })
   const [viewport, setViewport] = useState<ImageSize>({ width: 0, height: 0 })
@@ -137,8 +139,15 @@ function ImageStage({ src, title, previous, next }: { src: string; title: string
       }}>
       <img key={attempt} src={source} alt={title} draggable={false} className="iv-image"
         style={{ width: fitted.width, height: fitted.height, visibility: status === 'ready' ? 'visible' : 'hidden', transform: `translate(-50%, -50%) translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
-        onLoad={(event) => { setNatural({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }); setStatus('ready') }}
-        onError={() => setStatus('error')} />
+        onLoad={(event) => {
+          const size = { width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight }
+          setNatural(size); setStatus('ready')
+          void diagnostics.child(traceContext ?? {}).record('image.loaded', { url: src, source, title, attempt, ...size })
+        }}
+        onError={() => {
+          setStatus('error')
+          void diagnostics.child(traceContext ?? {}).record('image.error', { url: src, source, title, attempt })
+        }} />
       {status === 'loading' && <div className="iv-message" role="status"><span className="iv-spinner" />{t.loading}</div>}
       {status === 'error' && <div className="iv-message" role="alert"><ViewerIcon name="image" /><span>{t.failed}</span><button className="iv-retry" onPointerDown={(e) => e.stopPropagation()} onClick={() => { setStatus('loading'); setAttempt((n) => n + 1) }}><ViewerIcon name="retry" />{t.retry}</button></div>}
       {status === 'ready' && <span className="iv-resolution">{natural.width} × {natural.height}</span>}
@@ -155,7 +164,7 @@ function ImageStage({ src, title, previous, next }: { src: string; title: string
   </>
 }
 
-export function ImageViewer({ sources, title, previous, next, initialIndex = 0 }: { sources: string[]; title: string; previous?: () => void; next?: () => void; initialIndex?: number }) {
+export function ImageViewer({ sources, title, previous, next, initialIndex = 0, traceContext }: { sources: string[]; title: string; previous?: () => void; next?: () => void; initialIndex?: number; traceContext?: TraceContext }) {
   const [selected, setSelected] = useState(initialIndex)
   const index = Math.min(selected, Math.max(0, sources.length - 1))
   const rail = useRef<HTMLDivElement>(null)
@@ -164,7 +173,7 @@ export function ImageViewer({ sources, title, previous, next, initialIndex = 0 }
   }, [index])
   if (!sources.length) return <p className="bl-note">{t.failed}</p>
   return <div className="image-viewer">
-    <ImageStage key={sources[index]} src={sources[index]} title={title}
+    <ImageStage key={sources[index]} src={sources[index]} title={title} traceContext={traceContext}
       previous={sources.length > 1 ? (index > 0 ? () => setSelected(index - 1) : undefined) : previous}
       next={sources.length > 1 ? (index < sources.length - 1 ? () => setSelected(index + 1) : undefined) : next} />
     {sources.length > 1 && <div className="iv-gallery" ref={rail} role="group" aria-label={t.gallery}>

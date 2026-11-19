@@ -12,7 +12,7 @@ import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createServer, request } from 'node:http'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,6 +28,7 @@ let ollamaUrl
 let asked = []
 /** Set to hold the next answer open until released. */
 let gate = null
+let replies = []
 const bridges = []
 
 before(async () => {
@@ -42,6 +43,7 @@ before(async () => {
       for await (const chunk of req) body += chunk
       asked.push(JSON.parse(body))
       res.writeHead(200, { 'content-type': 'application/x-ndjson' })
+      if (replies.length) return res.end(JSON.stringify({ message: replies.shift() }) + '\n' + JSON.stringify({ done: true }) + '\n')
       res.write(JSON.stringify({ message: { content: 'Local ' } }) + '\n')
       if (gate) await gate
       res.write(JSON.stringify({ message: { content: 'answer, sir.' } }) + '\n')
@@ -242,4 +244,85 @@ test('in claude-only mode the same failure is reported, as it always was', async
   await face.until((f) => f.type === 'error', 30_000)
   await closed
   assert.equal(face.frames.some((f) => f.type === 'brain'), false)
+})
+
+test('PC tool observations and more than six exchanges survive a new bridge connection', async () => {
+  const bridge = await startBridge('continuity', { JARVIS_BRAIN: 'local', JARVIS_ALLOW_WRITES: '1' })
+  const path = join(dir, 'continuity', 'context.txt')
+  const content = 'x'.repeat(1500) + '\nThe verified reference is SAPPHIRE.'
+  writeFileSync(path, content)
+  const face = await open(bridge)
+  replies = [
+    { content: '', tool_calls: [{ function: { name: 'read_file', arguments: { path } } }] },
+    { content: 'Document lu.' },
+  ]
+  face.send({ type: 'ask', text: 'Lis le document.', id: 'read' })
+  const done = await face.until((f) => f.type === 'done' && f.ask === 'read')
+  assert.equal(done.exchange.messages.find((m) => m.role === 'tool').content, content)
+  face.ws.close()
+
+  const again = await open(bridge)
+  const history = [done.exchange, ...Array.from({ length: 7 }, (_, i) => ({ user: `question ${i}`, jarvis: `réponse ${i}` }))]
+  asked = []
+  again.send({ type: 'ask', text: 'Quelle référence as-tu lue ?', id: 'follow', history })
+  await again.until((f) => f.type === 'done' && f.ask === 'follow')
+  assert.equal(asked.length, 1, 'historical calls are context, not actions to replay')
+  assert.equal(asked[0].messages.find((m) => m.role === 'tool').content, content)
+  assert.ok(asked[0].tools.some((tool) => tool.function.name === 'run_command'))
+  assert.match(asked[0].messages[0].content, /Dossier courant/)
+  again.ws.close()
+})
+
+test('a bridge reconnection restores a confirmed action even when its turn never finished', async () => {
+  const bridge = await startBridge('partial', { JARVIS_BRAIN: 'local', JARVIS_ALLOW_WRITES: '1' })
+  const face = await open(bridge)
+  const path = join(dir, 'partial', 'once.txt')
+  const follow = await open(bridge)
+  let release
+  gate = new Promise((resolve) => { release = resolve })
+  try {
+    replies = [{ content: '', tool_calls: [{ function: { name: 'write_file', arguments: { path, content: 'saved' } } }] }]
+    face.send({ type: 'ask', text: 'save', id: 'save', exchangeId: 'exchange-1' })
+    const checkpoint = await face.until((f) => f.type === 'checkpoint' && f.exchange.messages.at(-1).content === 'Written.')
+    assert.equal(checkpoint.exchange.id, 'exchange-1')
+    assert.equal(readFileSync(path, 'utf8'), 'saved')
+    assert.equal(face.frames.some((f) => f.type === 'done'), false)
+    face.ws.close()
+    release()
+    gate = null
+    follow.send({ type: 'ask', text: 'where?', id: 'follow', history: [checkpoint.exchange] })
+    await follow.until((f) => f.type === 'done')
+    const messages = asked.findLast((request) => request.messages.at(-1).content === 'where?').messages
+    assert.equal(messages.filter((m) => m.role === 'tool' && m.content === 'Written.').length, 1)
+    assert.equal(messages.find((m) => m.tool_calls?.length).tool_calls[0].function.arguments.path, path)
+  } finally {
+    gate = null
+    release()
+    follow.ws.close()
+    face.ws.close()
+  }
+})
+
+test('real bridge persists model, tool and viewer traces with conversation identifiers', async () => {
+  const logs = join(dir, 'diagnostics')
+  const bridge = await startBridge('traced', { JARVIS_BRAIN: 'local', JARVIS_TRACE_DIR: logs, JARVIS_TRACE: '1' })
+  const face = await open(bridge)
+  const url = 'https://images.example/photo.webp?width=900'
+  replies = [
+    { content: '', tool_calls: [{ function: { name: 'show', arguments: { image: url } } }] },
+    { content: 'Photo affichée.' },
+  ]
+  face.send({ type: 'ask', text: 'Affiche la photo.', id: 'photo', conversationId: 'trace-conversation' })
+  await face.until((f) => f.type === 'done' && f.ask === 'photo')
+  face.send({ type: 'trace', event: 'image.error', data: { url, source: '/img?url=example', title: 'Photo' } })
+  const records = () => readdirSync(logs).flatMap((file) => readFileSync(join(logs, file), 'utf8').trim().split('\n').map(JSON.parse))
+  const deadline = Date.now() + 3000
+  while (!records().some((r) => r.event === 'image.error') && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20))
+  const saved = records()
+  for (const event of ['turn.start', 'route.selected', 'model.input', 'tool.start', 'tool.result', 'turn.end', 'image.error']) {
+    assert.ok(saved.some((r) => r.event === event && r.conversationId === 'trace-conversation'), event)
+  }
+  assert.equal(saved.find((r) => r.event === 'tool.start').data.arguments.image, url)
+  assert.equal(saved.find((r) => r.event === 'image.error').data.url, url)
+  face.ws.close()
 })

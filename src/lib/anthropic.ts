@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { env, MODEL, FAST_MODE, SYSTEM_PROMPT, activeServers } from '../config'
+import { diagnostics } from './trace'
 
 /**
  * The Claude API supports CORS, so the browser can talk to it directly — no
@@ -50,8 +51,11 @@ export async function ask(
   handlers: AskHandlers,
 ): Promise<{ text: string; tools: string[] }> {
   const servers = activeServers()
+  const logger = diagnostics.child({ turnId: crypto.randomUUID(), provider: 'anthropic-api' })
+  await logger.record('turn.start', { history })
   const usedTools: string[] = []
   let text = ''
+  let failed = false
   cancelled = false
 
   const betas = ['mcp-client-2025-11-20']
@@ -93,6 +97,7 @@ export async function ask(
       // has to check for itself rather than opening another one.
       if (cancelled) return { text: text.trim(), tools: usedTools }
 
+      await logger.record('model.input', { ...params, messages })
       const stream = client.beta.messages.stream({ ...params, messages })
       active = stream
 
@@ -122,11 +127,13 @@ export async function ask(
       let final: Anthropic.Beta.BetaMessage
       try {
         final = await stream.finalMessage()
+        await logger.record('model.response', { content: final.content, stopReason: final.stop_reason, usage: final.usage })
       } catch (err) {
         // A barge-in aborts this stream on purpose. That surfaces as a
         // rejection, and it isn't an error the user should see a toast for —
         // hand back what he'd already said.
         if (cancelled) return { text: text.trim(), tools: usedTools }
+        await logger.record('model.error', { error: err })
         throw err
       } finally {
         active = null
@@ -158,7 +165,12 @@ export async function ask(
 
       return { text: text.trim(), tools: usedTools }
     }
+  } catch (error) {
+    failed = true
+    await logger.record('turn.error', { error })
+    throw error
   } finally {
+    if (!failed) await logger.record(cancelled ? 'turn.cancel' : 'turn.end', { text, tools: usedTools })
     active = null
   }
 }

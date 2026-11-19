@@ -11,22 +11,6 @@ export type Phase =
   | 'speaking'  // reading the answer back
 
 /**
- * A card on the heads-up display.
- *
- * JARVIS authors the markup and picks the treatment — this is a delivery
- * envelope, not a template. The `html` is sanitised before it reaches the DOM.
- */
-export type Panel = {
-  id: string
-  title: string
-  html: string
-  anim: 'materialise' | 'sweep' | 'unfold' | 'stagger' | 'snap'
-  slot: 'right' | 'left' | 'wide'
-  accent: 'default' | 'amber' | 'violet' | 'green' | 'red'
-  hold: 'turn' | 'sticky'
-}
-
-/**
  * A blade — the big surface.
  *
  * A panel is a card you glance at while listening. A blade is the thing you
@@ -38,6 +22,7 @@ export type Panel = {
  */
 export type Blade = {
   id: string
+  trace?: { conversationId: string; turnId?: string }
   title: string
   kind: 'article' | 'image' | 'gallery' | 'video' | 'embed' | 'pdf' | 'markup' | 'camera'
   /** article / image / video / embed. */
@@ -253,8 +238,6 @@ type State = {
   bootNote: string
   /** False while sound and the microphone still wait on a first touch. */
   voiceReady: boolean
-  /** Cards currently on the display, newest last. */
-  panels: Panel[]
   /** Blades currently open, newest last — which is also front-most. */
   blades: Blade[]
   /** The blade the user has pulled forward, or null for "the newest one". */
@@ -278,8 +261,6 @@ type State = {
   setLooking: (why: string | null) => void
   setBootNote: (n: string) => void
   setVoiceReady: (ready: boolean) => void
-  pushPanel: (p: Panel) => void
-  clearPanels: () => void
   pushBlade: (b: Blade) => void
   closeBlade: (id: string) => void
   clearBlades: () => void
@@ -314,7 +295,6 @@ export const useStore = create<State>((set) => ({
   voice: '',
   gestures: false,
   looking: null,
-  panels: [],
   blades: [],
   focusedBlade: null,
   expandedBlade: null,
@@ -338,26 +318,6 @@ export const useStore = create<State>((set) => ({
   setLooking: (looking) => set({ looking }),
   setBootNote: (bootNote) => set({ bootNote }),
   setVoiceReady: (voiceReady) => set({ voiceReady }),
-  // Three is as many as fits around the reactor without crowding it. Sticky
-  // panels are exempt from the cull — the tool description promises they stay
-  // until replaced, and a plain slice(-3) silently evicted them the moment a
-  // fourth panel arrived in the same turn.
-  pushPanel: (panel) =>
-    set((s) => {
-      const next = [...s.panels, panel]
-      if (next.length <= 3) return { panels: next }
-      const keep: Panel[] = []
-      // Walk newest-first, keeping the newest three plus anything sticky.
-      for (let i = next.length - 1; i >= 0; i--) {
-        if (keep.length < 3 || next[i].hold === 'sticky') keep.unshift(next[i])
-      }
-      return { panels: keep }
-    }),
-  // Panels marked sticky survive the turn boundary; the rest clear when the
-  // user speaks again.
-  clearPanels: () =>
-    set((s) => ({ panels: s.panels.filter((p) => p.hold === 'sticky') })),
-
   /**
    * Six is the ceiling, and it is about the stack reading as a stack: past
    * about six the ones at the back are a millimetre of edge each and the depth
@@ -378,7 +338,7 @@ export const useStore = create<State>((set) => ({
       focusedBlade: s.focusedBlade === id ? null : s.focusedBlade,
       expandedBlade: s.expandedBlade === id ? null : s.expandedBlade,
     })),
-  // Same contract as panels: 'turn' blades go when the user speaks again,
+  // 'turn' blades go when the user speaks again,
   // 'sticky' ones stay until something replaces them.
   clearBlades: () =>
     set((s) => {
@@ -448,13 +408,9 @@ export const useStore = create<State>((set) => ({
   // the interface ignoring the instruction.
   clearScreen: (what) =>
     set((s) => {
-      const panels = what === 'transcript' ? s.panels : []
       const turns = what === 'panels' ? s.turns : []
-      // Blades clear with the panels. "Clear the screen" said out loud means the
-      // screen, and leaving a full-height article standing while the cards
-      // around it vanish is the interface arguing with the instruction.
       const blades = what === 'transcript' ? s.blades : []
-      const cleared = { panels, turns, blades, focusedBlade: null, expandedBlade: null }
+      const cleared = { turns, blades, focusedBlade: null, expandedBlade: null }
       return what === 'all'
         ? { ...cleared, caption: '', activeTool: null }
         : cleared
@@ -490,10 +446,10 @@ export function accentFor(phase: Phase, ui: UiState): string {
 // the visuals from the console without talking, e.g.
 //   __jarvis.setPhase('tooling'); __jarvis.setLevel(0.8)
 //   __jarvis.applyUi({ accent: '#ff5a3c', reactor: { style: 'wire', spin: 3 } })
-//   __jarvis.addOrbit({ id: 'moon', src: '/vite.svg', radius: 0.6, speed: 8,
+//   __jarvis.addOrbit({ id: 'moon', src: '/icon.svg', radius: 0.6, speed: 8,
 //                       size: 90, tilt: 25, opacity: 1, phase: 0 })
 //   __jarvis.fireEffect('glitch'); __jarvis.resetUi()
-if (import.meta.env.DEV) {
+if (typeof window !== 'undefined' && import.meta.env.DEV) {
   // Not `useStore.getState()` directly: zustand replaces the state object on
   // every set, so a captured snapshot's *actions* keep working while every
   // data field reads forever as it was at module load. `__jarvis.phase` said

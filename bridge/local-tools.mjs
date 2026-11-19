@@ -8,19 +8,20 @@
  *
  * The file primitives obey the same rules as Claude's: the same folders, the
  * same refusal of anything that holds credentials (policy.mjs). Writing waits
- * for JARVIS_ALLOW_WRITES like everything else. A shell is a separate switch
- * again, JARVIS_LOCAL_SHELL=1: a small model writes a plausible command far
- * more readily than a correct one, and nothing downstream can tell which.
+ * for JARVIS_ALLOW_WRITES like everything else. The bridge supplies the same
+ * shell primitive to every PC model when writes are enabled.
  */
 
 import { execFile, spawn } from 'node:child_process'
-import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, extname, join, resolve as resolvePath } from 'node:path'
 import { deviceTools } from '../shared/tools.mjs'
 import { forgetFacts, readFacts, rememberFact } from './memory.mjs'
 import { webExchange } from './net.mjs'
 import { pathProblem } from './policy.mjs'
+import { agentContext } from '../shared/agent-context.mjs'
+import { moveFile } from './move-file.mjs'
 
 const MAX_READ_BYTES = 4 * 1024 * 1024
 
@@ -32,7 +33,7 @@ const MAX_READ_BYTES = 4 * 1024 * 1024
  * @param {boolean} [opts.shell]  Offer `run_command` (needs allowWrites too).
  * @param {(blade:object)=>void} [opts.show]  Puts a blade on the interface.
  */
-export function localTools({ allowWrites = false, cwd, roots, shell = false, show } = {}) {
+export function localTools({ allowWrites = false, cwd, roots, shell = false, show, page } = {}) {
   /** The absolute path, or a thrown sentence saying why not. */
   const vet = (asked) => {
     if (typeof asked !== 'string' || !asked.trim()) throw new Error('no path was given')
@@ -78,32 +79,13 @@ export function localTools({ allowWrites = false, cwd, roots, shell = false, sho
         await mkdir(dirname(file), { recursive: true })
         await writeFile(file, content)
       },
-      async move(from, to) {
-        const source = vet(from)
-        const target = vet(to)
-        if (!(await stat(source)).isFile()) throw new Error('only single files can be moved')
-        try {
-          await stat(target)
-          throw new Error('a file with that name is already there')
-        } catch (err) {
-          if (err.code !== 'ENOENT') throw err
-        }
-        await mkdir(dirname(target), { recursive: true })
-        try {
-          await rename(source, target)
-        } catch (err) {
-          // Another drive: a rename cannot cross it, a copy can.
-          if (err.code !== 'EXDEV') throw err
-          await copyFile(source, target)
-          await rm(source)
-        }
-      },
+      move: (from, to, { signal } = {}) => moveFile(vet(from), vet(to), signal),
       open: (target) => openTarget(/^https?:\/\//i.test(target) ? target : vet(target)),
       ...(shell ? { shell: (command, { signal } = {}) => runCommand(command, cwd, signal) } : {}),
     })
   }
 
-  return deviceTools(platform)
+  return deviceTools(platform, { page })
 }
 
 /**
@@ -153,26 +135,21 @@ function runCommand(command, cwd, signal) {
 }
 
 /**
- * The persona, cut down to what a small model keeps hold of.
- *
- * The full prompt in server.mjs is several thousand tokens of register and
- * edge cases. Read by a two-billion-parameter model it is mostly noise, and it
- * is paid for again on every question at a few dozen tokens a second. This
- * keeps the rules that are audible — short, spoken, no markdown, the right
- * language — and adds the one thing only the stand-in needs to know: what it
- * cannot do.
+ * Voice style and remembered facts. Capability rules come from the common
+ * context builder and the actual catalogue, independently of the model.
  */
-export function localSystemPrompt({ language, roots = [], inbox, allowWrites = false, now = new Date() } = {}) {
+export function localSystemPrompt({ language, roots = [], inbox, allowWrites = false, tools = [], host, now = new Date() } = {}) {
   const facts = readFacts()
   return [
     language
       ? `ALWAYS ANSWER IN ${String(language).toUpperCase()}, whatever language anything else is in.`
       : 'Answer in the language the user speaks to you in.',
-    'You are JARVIS, a voice assistant. Everything you write is read aloud to one person.',
-    'Answer in one or two short sentences of plain speech. No markdown, no lists, no emoji, no symbols. Write numbers and times the way they are said. Be dry, precise and calm; call the user "sir" ("monsieur" in French) now and then. Never apologise and never explain your tools.',
-    'You are the backup brain running on this computer, because the main one cannot be reached. You can search the internet with web_search and read a page with web_fetch: use them for news and for any fact you would need to look up, and say so in one sentence if they fail. You cannot drive a browser, read mail or use other online services right now; if asked for one of those, say in one sentence that it has to wait until the main brain is back. Never invent a fact you would need to look up.',
+    'You are JARVIS, an assistant that acts through function calls. Only your FINAL natural-language answer is read aloud. Function calls are not spoken answers and must use the tool protocol.',
+    'When a request needs data or an action from a tool, call the function instead of announcing an intention, asking for confirmation already given, or inventing a result. After the result, continue the task. Give the final answer only when supported by the actual results.',
+    'Keep FINAL answers to one or two short sentences of plain speech. Use show for longer material. These voice-style rules apply only to the final answer, never to function calls or their arguments.',
+    agentContext({ tools, host }),
     `It is ${now.toLocaleString('en-GB', { dateStyle: 'full', timeStyle: 'short' })}.`,
-    roots.length
+    !host && roots.length
       ? `Your file tools reach only these folders: ${roots.join(' ; ')}. Always give absolute paths.` +
         (allowWrites ? ' You may create, move and open files there when asked.' : ' You may read there; you cannot change anything.')
       : '',

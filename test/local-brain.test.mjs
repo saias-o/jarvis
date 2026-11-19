@@ -102,7 +102,7 @@ test('text is streamed as it arrives and returned whole', async () => {
   assert.equal(text, 'Good evening, sir.')
   assert.deepEqual(heard, ['Good ', 'evening, sir.'])
   assert.equal(asked[0].model, 'gemma4:e2b')
-  assert.equal(asked[0].think, false)
+  assert.equal(asked[0].think, undefined)
   assert.equal(asked[0].options.num_ctx, 8192)
   assert.deepEqual(asked[0].messages.map((m) => m.role), ['system', 'user'])
 })
@@ -198,7 +198,7 @@ test('the last step offers no tools, so the model has to answer', async () => {
   assert.equal(asked[2].tools, undefined)
 })
 
-test('a model that refuses the think switch is asked again without it', async () => {
+test('reasoning stays at the model default, including models that reject a think override', async () => {
   rejectThink = true
   try {
     const local = fresh()

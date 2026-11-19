@@ -11,15 +11,16 @@
  * that agent arrives with tens of thousands of tokens of tool schemas: a
  * two-billion-parameter model on a CPU spends minutes reading them and then
  * calls the wrong one. So the stand-in gets its own loop — a short prompt, a
- * handful of tools (local-tools.mjs), and no memory of earlier tool output —
- * sized for what a small model does well: answer, look something up on disk,
- * note a fact, hand a file on.
+ * shared device catalogue (local-tools.mjs). Complete conversation records,
+ * including tool observations, use the same format as the other brains; the
+ * model's context window decides how much can be sent on each step.
  *
  * Nothing here imports the Agent SDK, so the loop can be tested against a fake
  * Ollama (test/local-brain.test.mjs).
  */
 
 import { agentTurn } from '../shared/agent-loop.mjs'
+import { fitContext } from '../shared/context-window.mjs'
 
 const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n))
 
@@ -112,27 +113,13 @@ export function createLocal(config = localConfig(), { fetchImpl = fetch, now = D
     return found
   }
 
-  /** Some models reject the `think` switch outright; remembered once learnt. */
-  let sendThink = true
-
   async function* chat(url, body, signal) {
-    const post = (payload) =>
-      fetchImpl(`${url}/api/chat`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal,
-      })
-
-    // Thinking is off: it is spoken latency, on a machine where every token
-    // already takes its time.
-    let res = await post(sendThink ? { ...body, think: false } : body)
-    if (!res.ok && sendThink && res.status === 400) {
-      const why = await res.text()
-      if (!/think/i.test(why)) throw new Error(`the local model refused the request: ${clip(why, 200)}`)
-      sendThink = false
-      res = await post(body)
-    }
+    // Use the model's native reasoning setting. Forcing think:false can stop
+    // Gemma from producing tool calls, even with a complete tool catalogue.
+    const res = await fetchImpl(`${url}/api/chat`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body), signal,
+    })
     if (!res.ok) {
       // A model that has gone since the last look should be looked for again.
       found = null
@@ -176,18 +163,24 @@ export function createLocal(config = localConfig(), { fetchImpl = fetch, now = D
    */
   async function turn(
     text,
-    { system, history = [], tools = [], images = [], signal, onText, onTool, maxSteps = 6 } = {},
+    { system, history = [], tools = [], images = [], signal, onText, onTool, onMessages, onCheckpoint, onProgress, trace, observations = [], maxSteps = 6 } = {},
   ) {
     const where = await locate()
     if (where.problem) throw new Error(where.problem)
 
     return agentTurn(text, {
-      system, history, tools, images, signal, onText, onTool, maxSteps,
-      chat: (messages, offer, abort) => chat(where.url, {
-        model, messages, ...(offer.length ? { tools: offer } : {}),
-        stream: true, keep_alive: keepAlive,
-        options: { num_ctx: ctx, temperature: 0.3 },
-      }, abort),
+      system, history, tools, images, signal, onText, onTool, onMessages, onCheckpoint, onProgress, trace, observations, maxSteps,
+      chat: async function* (messages, offer, abort) {
+        const fitted = fitContext(messages, offer, ctx * 3)
+        await trace?.('model.input', { provider: 'ollama', model, endpoint: where.url, messages: fitted, tools: offer, contextTokens: ctx })
+        yield* chat(where.url, {
+          // Keep complete observations while they fit; discard oldest exchanges
+          // before shortening older outputs within the current action sequence.
+          model, messages: fitted, ...(offer.length ? { tools: offer } : {}),
+          stream: true, keep_alive: keepAlive,
+          options: { num_ctx: ctx, temperature: 0.3 },
+        }, abort)
+      },
     })
   }
 

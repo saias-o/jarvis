@@ -22,12 +22,14 @@ function knownFolders() {
 }
 
 /** Reuse the PC's file tools and policy; Android keeps its own agent loop. */
-export function pcTools({ allowWrites = false, cwd, roots, folders = knownFolders() }) {
+export function pcTools({ allowWrites = false, shell = allowWrites, cwd, roots, folders = knownFolders() }) {
   const names = new Set(['list_files', 'read_file', 'write_file', 'move_file', 'open', 'run_command'])
   // The full desktop agent already has a shell when actions are enabled.
   // Preserve that capability for Android callers instead of reducing the PC
   // to a file server. Reuse the existing executor and write gate.
-  const tools = localTools({ allowWrites, cwd, roots, shell: allowWrites }).filter((tool) => names.has(tool.name))
+  const options = { allowWrites, cwd, roots, shell }
+  const tools = localTools(options).filter((tool) => names.has(tool.name))
+  let smallPages
   return {
     manifest: {
       home: homedir(), platform: process.platform, roots, allowWrites,
@@ -35,9 +37,11 @@ export function pcTools({ allowWrites = false, cwd, roots, folders = knownFolder
         typeof path === 'string' && path && !pathProblem(path, { cwd, roots }))),
       tools: tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
     },
-    async run({ name, args }, signal) {
+    async run({ name, args, compact }, signal) {
       signal?.throwIfAborted()
-      const tool = tools.find((tool) => tool.name === name)
+      if (!names.has(name)) throw new Error('PC tool unavailable; check write access on the PC')
+      if (compact === true) smallPages ??= localTools({ ...options, page: 600 })
+      const tool = (compact === true ? smallPages : tools).find((tool) => tool.name === name)
       if (!tool) throw new Error('PC tool unavailable; check write access on the PC')
       if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Invalid PC tool arguments')
       return tool.run(args, { signal })
