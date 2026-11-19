@@ -21,6 +21,8 @@
  * @property {(blade: object) => unknown} [show]  Puts a blade on the interface.
  * @property {(op: string, args: object) => unknown} [ui]  Hands an operation to the interface; see ui-tools.mjs.
  * @property {boolean} [camera]  Whether a blade may open the live camera view here.
+ * @property {(request: object) => Promise<{ data?: string, mimeType?: string, error?: string }>} [capture]
+ *   A frame from the camera, for models that can see images; see camera-tools.mjs.
  * @property {Function} [http]  Transport for the web tools; see web-tools.mjs.
  * @property {(command: string, options: { signal?: AbortSignal }) => Promise<string>} [shell]
  */
@@ -30,6 +32,7 @@ import { validatedTool } from './tool-validation.mjs'
 import { memoryStore } from './memory.mjs'
 import { uiTools } from './ui-tools.mjs'
 import { displayTools } from './display-tools.mjs'
+import { cameraTools } from './camera-tools.mjs'
 
 const DOCUMENTS = new Set([
   'pdf', 'doc', 'docx', 'odt', 'ods', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'rtf',
@@ -162,6 +165,7 @@ export function deviceTools(platform, { page = 5000 } = {}) {
       probe: platform.http && ((url, options) => webProbe(platform.http, url, options)) }))
   }
   if (platform.ui) tools.push(...uiTools(platform.ui))
+  if (platform.capture) tools.push(...cameraTools(platform.capture))
 
   if (platform.http) tools.push(...webTools(platform.http, { limit: page }))
 

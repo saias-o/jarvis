@@ -20,6 +20,11 @@ export function sdkDeviceTools(catalogue) {
     async (args, extra) => {
       try {
         const result = await entry.run(args, { signal: extra?.signal })
+        // What a tool saw ({ text, images }) reaches Claude as image content.
+        if (result && typeof result === 'object' && Array.isArray(result.images)) {
+          return { content: [{ type: 'text', text: String(result.text ?? '') },
+            ...result.images.map(({ data, mimeType }) => ({ type: 'image', data, mimeType }))] }
+        }
         return { content: [{ type: 'text', text: typeof result === 'string' ? result : JSON.stringify(result) }] }
       } catch (err) {
         return { isError: true, content: [{ type: 'text', text: String(err?.message ?? err) }] }

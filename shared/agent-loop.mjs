@@ -91,7 +91,11 @@ export async function agentTurn(text, {
           result = `That failed: ${err?.message ?? err}. Verify any possible side effects before retrying.`
         }
       }
-      messages.push({ role: 'tool', tool_name: name, content: excerpt(String(result ?? ''), 6000) })
+      // A tool can return what it saw: { text, images }. The picture rides with
+      // the result for this turn only; the snapshot kept in history drops it.
+      const seen = result && typeof result === 'object' && Array.isArray(result.images) ? result : null
+      messages.push({ role: 'tool', tool_name: name, content: excerpt(String(seen ? seen.text ?? '' : result ?? ''), 6000),
+        ...(seen?.images.length ? { images: seen.images.map((image) => image.data) } : {}) })
       onCheckpoint?.(snapshot())
       await trace?.('tool.result', { callId, name, result, error, durationMs: Date.now() - started, cancelled: signal?.aborted ?? false })
       signal?.throwIfAborted()

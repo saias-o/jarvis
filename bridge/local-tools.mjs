@@ -34,8 +34,9 @@ const MAX_READ_BYTES = 4 * 1024 * 1024
  * @param {(blade:object)=>void} [opts.show]  Puts a blade on the interface.
  * @param {(op:string, args:object)=>void} [opts.ui]  Redresses the interface (ui_* tools).
  * @param {boolean} [opts.camera]  Whether a blade may open the live camera view.
+ * @param {(request: object) => Promise<object>} [opts.capture]  A camera frame from the interface (look, watch).
  */
-export function localTools({ allowWrites = false, cwd, roots, shell = false, show, ui, camera = false, page } = {}) {
+export function localTools({ allowWrites = false, cwd, roots, shell = false, show, ui, camera = false, capture, page } = {}) {
   /** The absolute path, or a thrown sentence saying why not. */
   const vet = (asked) => {
     if (typeof asked !== 'string' || !asked.trim()) throw new Error('no path was given')
@@ -72,6 +73,7 @@ export function localTools({ allowWrites = false, cwd, roots, shell = false, sho
     show,
     ui,
     camera,
+    capture,
     http: webExchange,
   }
 

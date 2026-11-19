@@ -23,6 +23,7 @@ import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { UI_TOOLS } from '../shared/ui-tools.mjs'
 import { DISPLAY_TOOLS } from '../shared/display-tools.mjs'
+import { CAMERA_TOOLS } from '../shared/camera-tools.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { memoryPrompt, memoryServer, MEMORY_FILE, MEMORY_TOOLS } from './memory.mjs'
@@ -1944,6 +1945,9 @@ const onConnection = (socket) => {
     // The interface is redressed by the shared ui_* tools, whichever model asks.
     ...(DISABLED.has('interface') ? {} : { ui: (op, args) => send({ type: 'ui', op, args }) }),
     camera: !DISABLED.has('camera'),
+    // The camera is in the browser: a frame is asked for and awaited. A forward
+    // watch takes as long as it says it will, so it gets a longer timeout.
+    ...(DISABLED.has('camera') ? {} : { capture: (request) => ask('capture', request, request.mode === 'watch' ? 45_000 : 20_000) }),
   })
   const host = { ...androidPcTools.manifest, cwd: WORKSPACE }
   const capabilityContext = agentContext({ tools: localToolset, host })
@@ -2101,7 +2105,7 @@ const onConnection = (socket) => {
       // remember, forget, the screen and ui_* tools travel under jarvis_memory,
       // jarvis and jarvis_ui, once: the same entries, not a second copy.
       jarvis_device: deviceServer(localToolset.filter((entry) =>
-        !MEMORY_TOOLS.has(entry.name) && !UI_TOOLS.has(entry.name) && !DISPLAY_TOOLS.has(entry.name))),
+        !MEMORY_TOOLS.has(entry.name) && !UI_TOOLS.has(entry.name) && !DISPLAY_TOOLS.has(entry.name) && !CAMERA_TOOLS.has(entry.name))),
       jarvis: displayServer(localToolset),
       // The interface controls, on the same socket. A separate key because
       // MCP tool names are `mcp__<key>__<tool>` and one key can only carry
@@ -2117,7 +2121,7 @@ const onConnection = (socket) => {
         ? {}
         : { jarvis_chrome: chromeServer({ allowWrites: ALLOW_WRITES }) }),
       // The camera, which unlike everything else here has to ask and wait.
-      ...(DISABLED.has('camera') ? {} : { jarvis_eyes: visionServer(ask) }),
+      ...(DISABLED.has('camera') ? {} : { jarvis_eyes: visionServer(localToolset) }),
       // Long-term memory: a file of facts that outlives the session.
       jarvis_memory: memoryServer(localToolset),
     },
