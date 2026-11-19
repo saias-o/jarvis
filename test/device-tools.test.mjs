@@ -188,7 +188,7 @@ test('a picture from the web can be found and shown, even by a screen that canno
   await tools.find((tool) => tool.name === 'show').run({ title: 'Tour Eiffel', image: 'https://upload.example/eiffel.jpg' })
   assert.equal(shown.kind, 'image')
   assert.equal(shown.url, 'https://upload.example/eiffel.jpg')
-  assert.match(system, /Pour montrer une image du web : web_search, web_fetch/)
+  assert.match(system, /Image du web : web_fetch d’un résultat, puis show\(image = sa ligne « Image: »\)/)
 })
 
 test('the web tools never reach a private address, directly or by redirect', async () => {

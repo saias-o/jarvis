@@ -14,6 +14,7 @@ import { agentTurn } from '../shared/agent-loop.mjs'
 import { remoteChat } from '../shared/remote-chat.mjs'
 import { copyExclusive } from '../bridge/move-file.mjs'
 import { DISPLAY_TOOLS } from '../shared/display-tools.mjs'
+import { chromeTools } from '../bridge/chrome.mjs'
 
 let dir, child, url
 before(async () => {
@@ -307,7 +308,7 @@ test('on-device Gemma reads a PC or phone page, opens a blade or redresses the i
   const roots = ['Documents', 'Downloads', 'Pictures'].map((name) => join(dir, 'OneDrive', name))
   for (const root of roots) await mkdir(root, { recursive: true })
   const server = serverTools({ allowWrites: true, shell: true, cwd: roots[0], roots,
-    folders: { MyDocuments: roots[0], MyPictures: roots[2] } })
+    folders: { MyDocuments: roots[0], MyPictures: roots[2] }, extra: chromeTools({ allowWrites: true }) })
   const pc = await pcTools(async () => Response.json(server.manifest), 'http://100.64.0.1:8788', {}, () => '', undefined, undefined, () => true)
   const phone = await androidTools({ status: async () => ({ root: '/storage/emulated/0', inbox: '/data/user/0/dev.jarvis.app/files/inbox', granted: true }),
     readMemory: fullMemory }, { show: () => {}, ui: () => {}, http: () => {}, context: LOCAL_CONTEXT_BYTES - size(pc.system) - 400 })
@@ -318,7 +319,8 @@ test('on-device Gemma reads a PC or phone page, opens a blade or redresses the i
   const path = { path: join(roots[0], 'rapport trimestriel.txt') }
   for (const [group, read, args, result] of [['android', 'read_file', path, page], ['pc', 'pc_read_file', path, page],
     ['interface', 'ui_theme', { accent: '#ff2d2d' }, 'Interface retinted.'],
-    ['display', 'blade', { title: 'Rapport', kind: 'pdf', url: 'https://example.com/rapport.pdf' }, 'Open on the blades as "Rapport".']]) {
+    ['display', 'blade', { title: 'Rapport', kind: 'pdf', url: 'https://example.com/rapport.pdf' }, 'Open on the blades as "Rapport".'],
+    ['browser', 'pc_chrome_page_text', {}, page], ['browser_act', 'pc_chrome_find', { query: 'le champ de recherche' }, 'Found ref_12: textbox "Rechercher".']]) {
     await select.run({ group })
     const system = catalogue.localSystem()
     const offered = catalogue.offer(specsOf(catalogue.tools), true)
@@ -412,4 +414,28 @@ test('a fallback with the PC gone offers only the phone, and a manual mode never
   const pinned = androidChat({ inference: 'pc', catalogue: androidCatalogue(phone, pc), remote: fail, canFallback: () => false,
     discover: async () => pc, local: failing('must not run') })
   await assert.rejects(agentTurn('Bonjour', { tools: catalogue.tools, system: catalogue.system, chat: pinned.chat }), /down/)
+})
+
+test('the user’s Chrome reaches the phone through /pc-tools, gated by writes, with pictures made readable', async () => {
+  const reading = chromeTools({ allowWrites: false }).map((tool) => tool.name)
+  assert.ok(reading.includes('chrome_page_text') && !reading.some((name) => /click|type|key|form_input|new_tab|close_tab/.test(name)))
+  assert.ok(chromeTools({ allowWrites: true }).some((tool) => tool.name === 'chrome_click'))
+
+  const shot = { name: 'chrome_screenshot', description: 'Take a picture.', forgiving: true, parameters: { type: 'object', properties: {}, required: [] },
+    run: async () => ({ text: 'Screenshot of the page:', images: [{ type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' }] }) }
+  const server = serverTools({ cwd: dir, roots: [dir], folders: {}, extra: [shot] })
+  assert.ok(server.manifest.tools.some((tool) => tool.name === 'chrome_screenshot'))
+  const fetcher = async (_url, init) => init?.method === 'POST'
+    ? Response.json({ result: await server.run(JSON.parse(init.body)) }) : Response.json(server.manifest)
+  const pc = await pcTools(fetcher, 'http://pc', {}, () => '')
+  const answer = await pc.tools.find((tool) => tool.name === 'pc_chrome_screenshot').run({})
+  assert.match(answer, /^Screenshot of the page:\n\[1 image\(s\) taken on the PC; this model cannot read images/)
+  assert.ok(!answer.includes('iVBORw0KGgo='))
+
+  // A tool with no paging of its own is cut to one short page for a small model.
+  const long = { ...shot, name: 'chrome_page_text', run: async () => 'mot '.repeat(1000) }
+  const paged = serverTools({ cwd: dir, roots: [dir], folders: {}, extra: [long] })
+  const cut = await paged.run({ name: 'chrome_page_text', args: {}, compact: true })
+  assert.match(cut, /^(mot ){150}\n\[3400 more characters cut for this model/)
+  assert.equal((await paged.run({ name: 'chrome_page_text', args: {} })).length, 4000)
 })

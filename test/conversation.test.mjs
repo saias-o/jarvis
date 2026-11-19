@@ -114,6 +114,6 @@ test('PC context derives its capabilities and actual folders from the catalogue'
   } })
   assert.match(prompt, /PowerShell et .NET/)
   assert.match(prompt, /OneDrive\/Pictures/)
-  assert.match(prompt, /web_search, web_fetch/)
+  assert.match(prompt, /web_search puis web_fetch/)
   assert.doesNotMatch(prompt, /backup brain|cannot drive a browser|wait until the main brain/)
 })

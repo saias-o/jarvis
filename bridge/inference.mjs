@@ -2,7 +2,7 @@
 // message using the existing Claude login; it never runs the desktop agent.
 
 /** Room for the phone's catalogue and the PC's side by side, with margin. */
-export const MAX_TOOLS = 32
+export const MAX_TOOLS = 64
 import { traceData } from '../shared/trace.mjs'
 import { INFERENCE_MAX_MESSAGES } from '../shared/remote-chat.mjs'
 

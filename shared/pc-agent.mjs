@@ -18,6 +18,10 @@ export async function pcTools(fetcher, url, files, token, signal, trace, smallCo
       })
       const body = await result.json()
       if (!result.ok) throw new Error(body.error || `Action PC refusée (${result.status}).`)
+      // A picture (a browser screenshot) cannot be read by the phone's models.
+      if (body.result && typeof body.result === 'object' && Array.isArray(body.result.images)) {
+        return `${body.result.text ?? ''}\n[${body.result.images.length} image(s) taken on the PC; this model cannot read images. Use pc_chrome_page_text or pc_chrome_read_page for the content.]`.trim()
+      }
       return body.result
     },
   }))
@@ -44,7 +48,7 @@ export async function pcTools(fetcher, url, files, token, signal, trace, smallCo
   const facts = [
     `PC connecté (${manifest.platform}). Dossier utilisateur : ${manifest.home}. Dossiers PC autorisés : ${roots.join(' ; ')}.`,
     others.length ? `Dossiers PC connus : ${others.join(' ; ')}.` : '',
-    `Écritures PC : ${manifest.allowWrites ? 'autorisées' : 'désactivées'}. pc_* agit sur le PC. upload_to_pc copie depuis Android et renvoie le chemin PC. show(image=chemin_PC) affiche sur le téléphone.`,
+    `Écritures PC : ${manifest.allowWrites ? 'autorisées' : 'désactivées'}. upload_to_pc copie depuis Android et renvoie le chemin PC. show(image=chemin_PC) affiche sur le téléphone.`,
     manifest.tools.some((tool) => tool.name === 'run_command')
       ? `pc_run_command utilise le shell du compte PC (${manifest.platform === 'win32' ? 'PowerShell et .NET' : 'shell système'}), notamment pour capturer l’écran du PC.` : '',
   ].filter(Boolean)

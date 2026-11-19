@@ -24,7 +24,7 @@ import { uiServer } from './ui.mjs'
 import { UI_TOOLS } from '../shared/ui-tools.mjs'
 import { DISPLAY_TOOLS } from '../shared/display-tools.mjs'
 import { CAMERA_TOOLS } from '../shared/camera-tools.mjs'
-import { chromeAvailable, chromeServer } from './chrome.mjs'
+import { chromeAvailable, chromeServer, chromeTools, isChromeTool } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { memoryPrompt, memoryServer, MEMORY_FILE, MEMORY_TOOLS } from './memory.mjs'
 import { createRemote, REMOTE_FILE } from './remote.mjs'
@@ -1010,7 +1010,9 @@ async function remoteGate(req, res) {
   return true
 }
 
-const androidPcTools = pcTools({ allowWrites: ALLOW_WRITES, shell: LOCAL_SHELL, cwd: WORKSPACE, roots: TOOL_ROOTS })
+/** The user's Chrome, built once: its tab state belongs to the browser, not to a connection. */
+const BROWSER_TOOLS = DISABLED.has('browser') ? [] : chromeTools({ allowWrites: ALLOW_WRITES })
+const androidPcTools = pcTools({ allowWrites: ALLOW_WRITES, shell: LOCAL_SHELL, cwd: WORKSPACE, roots: TOOL_ROOTS, extra: BROWSER_TOOLS })
 const inferAndroid = createInference({ query, model: MODEL, effort: EFFORT, cwd: WORKSPACE, executable: process.env.JARVIS_CLAUDE_EXECUTABLE, host: androidPcTools.manifest })
 let inferenceRequests = 0
 
@@ -1936,7 +1938,7 @@ const onConnection = (socket) => {
   }
 
   /** The local model's tools, drawing on this connection's screen. */
-  const localToolset = localTools({
+  const localToolset = [...localTools({
     allowWrites: ALLOW_WRITES,
     cwd: WORKSPACE,
     roots: TOOL_ROOTS,
@@ -1948,7 +1950,7 @@ const onConnection = (socket) => {
     // The camera is in the browser: a frame is asked for and awaited. A forward
     // watch takes as long as it says it will, so it gets a longer timeout.
     ...(DISABLED.has('camera') ? {} : { capture: (request) => ask('capture', request, request.mode === 'watch' ? 45_000 : 20_000) }),
-  })
+  }), ...BROWSER_TOOLS]
   const host = { ...androidPcTools.manifest, cwd: WORKSPACE }
   const capabilityContext = agentContext({ tools: localToolset, host })
 
@@ -2105,7 +2107,7 @@ const onConnection = (socket) => {
       // remember, forget, the screen and ui_* tools travel under jarvis_memory,
       // jarvis and jarvis_ui, once: the same entries, not a second copy.
       jarvis_device: deviceServer(localToolset.filter((entry) =>
-        !MEMORY_TOOLS.has(entry.name) && !UI_TOOLS.has(entry.name) && !DISPLAY_TOOLS.has(entry.name) && !CAMERA_TOOLS.has(entry.name))),
+        !MEMORY_TOOLS.has(entry.name) && !UI_TOOLS.has(entry.name) && !DISPLAY_TOOLS.has(entry.name) && !CAMERA_TOOLS.has(entry.name) && !isChromeTool(entry.name))),
       jarvis: displayServer(localToolset),
       // The interface controls, on the same socket. A separate key because
       // MCP tool names are `mcp__<key>__<tool>` and one key can only carry
@@ -2119,7 +2121,7 @@ const onConnection = (socket) => {
       // the write gate is read once, at the same point as everything else.
       ...(DISABLED.has('browser')
         ? {}
-        : { jarvis_chrome: chromeServer({ allowWrites: ALLOW_WRITES }) }),
+        : { jarvis_chrome: chromeServer(localToolset) }),
       // The camera, which unlike everything else here has to ask and wait.
       ...(DISABLED.has('camera') ? {} : { jarvis_eyes: visionServer(localToolset) }),
       // Long-term memory: a file of facts that outlives the session.

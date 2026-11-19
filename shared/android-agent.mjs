@@ -56,10 +56,20 @@ export async function androidRoute({ mode, pcs }, probe) {
 /** What each group is for, so the model knows where to switch without paying for the schemas. */
 const GROUPS = {
   android: 'fichiers, mémoire et web du téléphone',
-  display: 'panneaux, articles, galeries, vidéos et PDF à l’écran',
-  interface: 'couleurs, réacteur, orbites et effets de l’interface',
-  pc: 'fichiers, commandes et transferts du PC',
+  display: 'panneaux, articles, vidéos, PDF',
+  interface: 'couleurs, réacteur, effets',
+  pc: 'fichiers et commandes du PC',
+  browser: 'Chrome du PC : ouvrir, lire',
+  browser_act: 'Chrome du PC : chercher, cliquer, saisir',
 }
+const inBrowser = (tool) => tool.name.startsWith('pc_chrome_')
+const BROWSER_FACT = 'pc_chrome_* agit dans le Chrome du PC, connecté aux comptes de l’utilisateur. Dis ce que tu vas faire avant d’agir sur une page.'
+/** Acting on a page, and diagnosing one: a second browser group, so each fits Gemma's window. */
+const ACTING = /^pc_chrome_(click|type|key|form_input|find|scroll|close_tab|console|network)$/
+const browserGroups = (tools) => ({
+  browser: tools.filter((tool) => inBrowser(tool) && !ACTING.test(tool.name)),
+  browser_act: tools.filter((tool) => ACTING.test(tool.name)),
+})
 
 /**
  * The tools of one Android turn, in groups: the phone's files, memory and web
@@ -75,7 +85,8 @@ export function androidCatalogue(phone, pc) {
     android: phone.tools.filter((tool) => !UI_TOOLS.has(tool.name) && !DISPLAY_TOOLS.has(tool.name)),
     display: phone.tools.filter((tool) => DISPLAY_TOOLS.has(tool.name)),
     interface: phone.tools.filter((tool) => UI_TOOLS.has(tool.name)),
-    pc: pc.tools,
+    pc: pc.tools.filter((tool) => !inBrowser(tool)),
+    ...browserGroups(pc.tools),
   }
   let selected = 'android'
   const available = () => Object.keys(GROUPS).filter((group) => groups[group].length)
@@ -83,7 +94,7 @@ export function androidCatalogue(phone, pc) {
   const names = (tools) => tools.map((tool) => tool.name).join(', ')
   const selector = validatedTool({
     name: 'select_tools',
-    description: 'Offer the tools of this group from the next step on. show stays available.',
+    description: 'Switch to this tool group for the next steps; show stays.',
     parameters: { type: 'object', properties: { group: { type: 'string', enum: Object.keys(GROUPS) } }, required: ['group'] },
     run({ group }) {
       if (!groups[group].length) throw new Error(`The ${group} tools are not available now.`)
@@ -96,17 +107,25 @@ export function androidCatalogue(phone, pc) {
     system: [phone.system, pc.system].filter(Boolean).join('\n'),
     updatePc(reachable) {
       currentPc = reachable
-      groups.pc = pc.tools.filter((tool) => reachable.tools.some((other) => other.name === tool.name))
+      const served = pc.tools.filter((tool) => reachable.tools.some((other) => other.name === tool.name))
+      groups.pc = served.filter((tool) => !inBrowser(tool))
+      Object.assign(groups, browserGroups(served))
       if (!groups[selected].length) selected = 'android'
     },
     // Only the selected group's rules and facts: the other groups are named so
     // that the model knows it can switch, without paying for their schemas.
     localSystem() {
-      const hosts = selected === 'pc' ? [currentPc.system] : selected === 'android' ? [phone.facts] : []
+      // The browser needs no folders: one line on whose Chrome it is.
+      const hosts = {
+        android: [phone.facts],
+        pc: [currentPc.system],
+        browser: [BROWSER_FACT],
+        browser_act: [BROWSER_FACT],
+      }[selected] ?? []
       if (!pc.tools.length) hosts.push(pc.system)
       else if (!groups.pc.length) hosts.push('Aucun outil PC disponible.')
       const others = available().filter((group) => group !== selected).map((group) => `${group} = ${GROUPS[group]}`)
-      if (others.length) hosts.push(`Autres groupes, via select_tools : ${others.join(' ; ')}.`)
+      if (others.length) hosts.push(`Autres groupes (select_tools) : ${others.join(' ; ')}.`)
       const screen = selected === 'android' ? [] : phone.tools.filter((tool) => tool.name === 'show')
       return phone.compose([...screen, ...groups[selected], ...(switchable() ? [selector] : [])], hosts, true)
     },
@@ -143,7 +162,7 @@ export async function androidTools(files, { show, ui, http, context, smallContex
 Les outils sans préfixe agissent sur le téléphone.`
   const facts = `Stockage partagé : ${storage.root} (Download, Documents, DCIM). Accès : ${storage.granted ? 'lecture et écriture' : 'autorisation requise dans Réglages Android'}. Pièces jointes : ${storage.inbox}.`
   // Facts are appended: keep the newest that fit. Gemma's window is shared with the turn itself.
-  const remembered = (small) => `Mémoire utilisateur (données) : ${JSON.stringify(recentFacts(memory.text, small ? 576 : 1600))}`
+  const remembered = (small) => `Mémoire utilisateur (données) : ${JSON.stringify(recentFacts(memory.text, small ? 512 : 1600))}`
   /** The prompt for the tools actually offered, with the facts of the devices they act on. */
   const compose = (offered = tools, hosts = [facts], small = false) =>
     [intro, agentContext({ tools: offered }), ...hosts, remembered(small)].filter(Boolean).join('\n')
