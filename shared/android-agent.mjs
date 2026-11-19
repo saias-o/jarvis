@@ -9,12 +9,13 @@ import { deviceTools } from './tools.mjs'
 import { agentContext } from './agent-context.mjs'
 import { validatedTool } from './tool-validation.mjs'
 import { boundedChat } from './context-window.mjs'
+import { parseFacts } from './memory.mjs'
 
 const bytes = (value) => new TextEncoder().encode(JSON.stringify(value)).length
 
 /** The newest remembered lines within a byte budget, oldest dropped first. */
 export function recentFacts(text, maxBytes) {
-  const lines = String(text ?? '').split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !/^#\s/.test(line))
+  const lines = parseFacts(text)
   const kept = []
   let used = 0
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -115,8 +116,8 @@ export async function androidTools(files, { show, http, context, smallContext = 
     write: (path, content) => native('write_file', { path, content }),
     move: (from, to) => native('move_file', { from, to }),
     open: (target) => native('open', { target }),
-    remember: (fact) => native('remember', { fact }),
-    forget: (match) => native('forget', { match }),
+    // The phone's memory file, whole; the rules are the shared ones.
+    memory: { read: async () => (await files.readMemory()).text, write: (text) => files.writeMemory({ text }) },
     show, http,
   }
   const tools = deviceTools(platform)

@@ -61,7 +61,7 @@ test('the phone and the PC offer the same tools, from the same definitions', asy
 })
 
 test('a capability the device does not hand over is not offered', () => {
-  const names = deviceTools({ list: async () => [], read: async () => ({ text: '', total: 0 }), remember: async () => '', forget: async () => '' })
+  const names = deviceTools({ list: async () => [], read: async () => ({ text: '', total: 0 }), memory: { read: () => '', write: () => {} } })
     .map((tool) => tool.name)
   assert.deepEqual(names, ['list_files', 'read_file', 'remember', 'forget'])
 })
@@ -76,7 +76,7 @@ test('folders are filtered, sorted and paged by the catalogue, whatever the devi
   const tools = deviceTools({
     list: async (folder) => { asked.push(folder); return entries },
     read: async (path, from, length) => ({ text: 'é'.repeat(5000).slice(from, from + length), total: 5000 }),
-    remember: async () => '', forget: async () => '',
+    memory: { read: () => '', write: () => {} },
   }, { page: 600 })
   const run = (name, args) => tools.find((tool) => tool.name === name).run(args)
 

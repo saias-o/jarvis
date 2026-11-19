@@ -133,24 +133,6 @@ class JarvisFilesPlugin : Plugin() {
                         }
                         withContext(Dispatchers.Main) { activity.startActivity(view) }; "Opened."
                     }
-                    "remember" -> {
-                        val fact = args.optString("fact").replace(Regex("[\\r\\n]+"), " ").trim().take(500)
-                        require(fact.isNotBlank()) { "Empty fact" }
-                        synchronized(this@JarvisFilesPlugin) {
-                            val lines = if (memory.exists()) memory.readLines() else listOf("# Memory", "")
-                            val entry = "- $fact"
-                            if (entry !in lines) memory.writeText((lines + entry).joinToString("\n") + "\n")
-                        }; "Remembered."
-                    }
-                    "forget" -> {
-                        val match = args.optString("match").trim()
-                        require(match.isNotEmpty()) { "Missing match" }
-                        synchronized(this@JarvisFilesPlugin) {
-                            if (memory.exists()) memory.writeText(memory.readLines().filterNot {
-                                it.startsWith("- ") && it.contains(match, true)
-                            }.joinToString("\n") + "\n")
-                        }; "Forgotten."
-                    }
                     else -> error("Unknown tool")
                 }
                 call.resolve(JSObject().put("result", result))
@@ -158,8 +140,19 @@ class JarvisFilesPlugin : Plugin() {
         }
     }
 
+    // The memory file, whole: its format, limits and matching are the shared
+    // rules (shared/memory.mjs), applied in the WebView as on the PC.
     @PluginMethod fun readMemory(call: PluginCall) {
-        call.resolve(JSObject().put("text", if (memory.exists()) memory.readText().take(6000) else ""))
+        val text = synchronized(this) { if (memory.exists()) memory.readText() else "" }
+        call.resolve(JSObject().put("text", text))
+    }
+
+    @PluginMethod fun writeMemory(call: PluginCall) {
+        val text = call.getString("text") ?: return call.reject("Missing text")
+        try {
+            synchronized(this) { memory.writeText(text) }
+            call.resolve()
+        } catch (e: Exception) { call.reject(e.message ?: "Memory write failed", e) }
     }
 
     @PluginMethod fun saveAttachment(call: PluginCall) {

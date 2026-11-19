@@ -13,8 +13,8 @@
  * @property {(folder: string) => Promise<{ name: string, dir: boolean, size: number }[]>} list
  * @property {(path: string, from: number, length: number) => Promise<{ text: string, total: number }>} read
  *   A slice of a text file and the length of the whole, in characters.
- * @property {(fact: string) => Promise<string>} remember
- * @property {(match: string) => Promise<string>} forget
+ * @property {{ read(): Promise<string> | string, write(text: string): unknown }} memory
+ *   The device's memory file, whole. Its rules are shared/memory.mjs.
  * @property {(path: string, content: string) => Promise<unknown>} [write]
  * @property {(from: string, to: string, options?: { signal?: AbortSignal }) => Promise<unknown>} [move]  Must never replace a destination.
  * @property {(target: string) => Promise<unknown>} [open]
@@ -25,6 +25,7 @@
 
 import { webTools } from './web-tools.mjs'
 import { validatedTool } from './tool-validation.mjs'
+import { memoryStore } from './memory.mjs'
 
 const DOCUMENTS = new Set([
   'pdf', 'doc', 'docx', 'odt', 'ods', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'rtf',
@@ -114,20 +115,23 @@ export function deviceTools(platform, { page = 5000 } = {}) {
     })
   }
 
-  tools.push(
-    {
-      name: 'remember',
-      description: 'Remember one short fact about the user, never passwords or credentials.',
-      parameters: schema({ fact: string }),
-      run: ({ fact }) => platform.remember(String(fact ?? '')),
-    },
-    {
-      name: 'forget',
-      description: 'Forget facts containing these words.',
-      parameters: schema({ match: string }),
-      run: ({ match }) => platform.forget(String(match ?? '')),
-    },
-  )
+  if (platform.memory) {
+    const memory = memoryStore(platform.memory)
+    tools.push(
+      {
+        name: 'remember',
+        description: 'Remember one short fact about the user, never passwords or credentials.',
+        parameters: schema({ fact: string }),
+        run: ({ fact }) => memory.remember(fact),
+      },
+      {
+        name: 'forget',
+        description: 'Forget facts containing these words.',
+        parameters: schema({ match: string }),
+        run: ({ match }) => memory.forget(match),
+      },
+    )
+  }
 
   if (platform.show) {
     tools.push({

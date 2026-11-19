@@ -17,7 +17,7 @@ import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, extname, join, resolve as resolvePath } from 'node:path'
 import { deviceTools } from '../shared/tools.mjs'
-import { forgetFacts, readFacts, rememberFact } from './memory.mjs'
+import { memoryFile, readFacts } from './memory.mjs'
 import { webExchange } from './net.mjs'
 import { pathProblem } from './policy.mjs'
 import { agentContext } from '../shared/agent-context.mjs'
@@ -66,8 +66,7 @@ export function localTools({ allowWrites = false, cwd, roots, shell = false, sho
       const all = bytes.toString('utf8')
       return { text: all.slice(from, from + length), total: all.length }
     },
-    remember: async (fact) => rememberFact(fact),
-    forget: async (match) => forgetFacts(match),
+    memory: memoryFile,
     show,
     http: webExchange,
   }

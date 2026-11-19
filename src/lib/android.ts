@@ -31,6 +31,7 @@ export const JarvisFiles = registerPlugin<{
   requestAccess(): Promise<void>
   run(options: { name: string; args: Record<string, unknown> }): Promise<{ result: string }>
   readMemory(): Promise<{ text: string }>
+  writeMemory(options: { text: string }): Promise<void>
   saveAttachment(options: { name: string; data: string }): Promise<{ path: string; name: string; size: number }>
   takeShares(): Promise<{ files: Array<{ path: string; name: string; size: number }> }>
   upload(options: { path: string; url: string; token: string }): Promise<{ path: string }>

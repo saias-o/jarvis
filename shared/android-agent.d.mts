@@ -29,6 +29,7 @@ export function recentFacts(text: string, maxBytes: number): string
 export function androidTools(files: {
   status(): Promise<{ root: string; inbox: string; granted: boolean }>
   readMemory(): Promise<{ text: string }>
+  writeMemory?(options: { text: string }): Promise<unknown>
   run(options: { name: string; args: Record<string, unknown> }): Promise<{ result: string }>
 }, platform?: {
   /** Puts a blade on the interface; an image blade's url is a PC path or a web address. */

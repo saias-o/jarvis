@@ -342,11 +342,11 @@ test('remembered facts keep the newest lines within their budget', () => {
 test('PC inference failing mid-turn continues on Gemma with the PC tools it still serves, without replaying an action', async () => {
   const target = join(dir, 'fallback.txt')
   await writeFile(target, 'Contenu du PC.')
-  const remembered = []
+  let memory = '', writes = 0
   const phone = await androidTools({
     status: async () => ({ root: '/storage/emulated/0', inbox: '/phone/inbox', granted: true }),
-    readMemory: async () => ({ text: '' }),
-    run: async ({ name, args }) => { assert.equal(name, 'remember'); remembered.push(args.fact); return { result: 'Remembered.' } },
+    readMemory: async () => ({ text: memory }),
+    writeMemory: async ({ text }) => { writes++; memory = text },
   }, { show: () => {}, context: LOCAL_CONTEXT_BYTES })
   let source
   const discover = () => pcTools(fetch, url, {}, () => '', undefined, undefined, () => source() === 'device')
@@ -382,7 +382,8 @@ test('PC inference failing mid-turn continues on Gemma with the PC tools it stil
   })
   assert.equal(answer, 'Le fichier dit : Contenu du PC.')
   assert.equal(model.source(), 'device')
-  assert.deepEqual(remembered, ['Évan range ses rapports sur le PC.'])
+  assert.equal(writes, 1)
+  assert.match(memory, /^- Évan range ses rapports sur le PC\. \(/m)
   assert.equal(fallbacks, 1)
   assert.ok(localOffers[0].includes('select_device_tools') && !localOffers[0].includes('pc_read_file'))
   assert.ok(localOffers[1].includes('pc_read_file'))

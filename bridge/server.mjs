@@ -23,7 +23,7 @@ import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
-import { memoryPrompt, memoryServer, MEMORY_FILE } from './memory.mjs'
+import { memoryPrompt, memoryServer, MEMORY_FILE, MEMORY_TOOLS } from './memory.mjs'
 import { createRemote, REMOTE_FILE } from './remote.mjs'
 import { brainMode, createHealth, createProbe, resetTime, unavailable } from './router.mjs'
 import { createLocal, localConfig } from './local.mjs'
@@ -2093,7 +2093,8 @@ const onConnection = (socket) => {
     // connection rather than once.
     mcpServers: {
       ...MCP_SERVERS,
-      jarvis_device: deviceServer(localToolset),
+      // remember and forget travel under jarvis_memory, once: the same entries, not a second copy.
+      jarvis_device: deviceServer(localToolset.filter((entry) => !MEMORY_TOOLS.has(entry.name))),
       jarvis: displayServer(
         (blade) => send({ type: 'blade', blade }),
         { camera: !DISABLED.has('camera') },
@@ -2114,7 +2115,7 @@ const onConnection = (socket) => {
       // The camera, which unlike everything else here has to ask and wait.
       ...(DISABLED.has('camera') ? {} : { jarvis_eyes: visionServer(ask) }),
       // Long-term memory: a file of facts that outlives the session.
-      jarvis_memory: memoryServer(),
+      jarvis_memory: memoryServer(localToolset),
     },
     // A plain system prompt, not the claude_code preset. The preset is
     // tuned for a coding agent — verbose, file-oriented, and a large chunk
