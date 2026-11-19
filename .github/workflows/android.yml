@@ -21,6 +21,9 @@ jobs:
     env:
       VITE_VOICE_LANG: fr-FR
       VITE_BOOT_SEQUENCE: 'false'
+      # Kokoro pulls in onnxruntime-node; the APK never uses its CUDA binaries,
+      # whose download now fails on the runner.
+      ONNXRUNTIME_NODE_INSTALL_CUDA: skip
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
