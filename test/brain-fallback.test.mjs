@@ -204,7 +204,14 @@ test('an interrupt stops the local answer, and the next question is answered', a
   await face.until((f) => f.type === 'text' && f.ask === 'i1')
   face.send({ type: 'interrupt' })
   gate = null
+  const before = asked.length
   face.send({ type: 'ask', text: 'short one', id: 'i2' })
+  // The old answer may only finish once the bridge has read the interrupt. Its
+  // socket is read in order, so the second question reaching the model proves
+  // it; releasing earlier races two connections and can complete i1 first.
+  for (let waited = 0; asked.length === before && waited < 10_000; waited += 10) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
   release()
   await face.until((f) => f.type === 'done' && f.ask === 'i2')
   assert.equal(face.frames.some((f) => f.type === 'done' && f.ask === 'i1'), false)

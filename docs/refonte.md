@@ -30,7 +30,7 @@ Audit du 19 novembre 2026 sur Windows, branche `codex/android`, base Git `6933b6
   - [ ] Migrer Chrome via `/pc-tools`, en vérifiant schéma reçu **et** exécution sur l'appareil annoncé.
   - [ ] Android voit les images : transmettre `images` à Gemma (contenu image LiteRT) ou à `/inference`, puis fournir `capture` depuis `camera.ts` dans la WebView.
 - [ ] **Lot 6** · Découper le bridge et vérifier ses contrats.
-  - [ ] Instabilité observée : « an interrupt stops the local answer, and the next question is answered » a reçu une trame `error` deux fois de suite sur le runner Linux (run n°22, commit `c204991`), puis a réussi sans changement de code (run n°23). Jamais reproduit sous Windows (8 sur 8). Le test affiche désormais l'erreur et le journal du bridge : lire ce message au prochain échec avant de découper l'interruption locale.
+  - [x] Instabilité du test d'interruption locale expliquée et corrigée : le test libérait la réponse factice de i1 avant que le bridge ait lu l'interruption (deux connexions, aucun ordre garanti), et i1 se terminait légitimement sur le runner Linux plus lent. Il attend désormais que la question suivante atteigne le modèle, preuve que l'interruption a été lue (le socket est lu dans l'ordre). Le bridge n'était pas en cause.
 - [ ] **Lot 7** · Isoler la voix et la présentation.
 - [ ] **Lot 8** · Mesurer et réduire le coût de démarrage et des traces.
 
