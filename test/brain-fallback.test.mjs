@@ -208,7 +208,8 @@ test('an interrupt stops the local answer, and the next question is answered', a
   release()
   await face.until((f) => f.type === 'done' && f.ask === 'i2')
   assert.equal(face.frames.some((f) => f.type === 'done' && f.ask === 'i1'), false)
-  assert.equal(face.frames.some((f) => f.type === 'error'), false)
+  // Compared whole so that a failure names the error and the bridge's own log.
+  assert.deepEqual(face.frames.filter((f) => f.type === 'error'), [], bridge.log.slice(-2000))
   face.ws.close()
 })
 
