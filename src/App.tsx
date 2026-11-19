@@ -11,6 +11,7 @@ import { Talk } from './ui/Talk'
 import { Ask } from './ui/Ask'
 import { Drop } from './ui/Drop'
 import { takeAttachments } from './lib/upload'
+import { applyUiOp } from './lib/uiOps'
 import { useStore } from './store'
 import { startVoice, type Voice, type VoiceMode } from './lib/voice'
 import { withoutVocative } from '../shared/wake-phrase.mjs'
@@ -508,31 +509,7 @@ export default function App() {
     // The interface is JARVIS's to drive. These arrive out of band, pushed
     // mid-turn the way panels are, so a command can retint the reactor or put
     // something into orbit while he is still speaking the sentence about it.
-    watchUi((op, args) => {
-      const s = store.getState()
-      const a = (args ?? {}) as Record<string, never>
-      switch (op) {
-        case 'patch':
-          s.applyUi(args)
-          break
-        case 'orbit':
-          if (a.action === 'add') s.addOrbit(args)
-          else if (a.action === 'remove') s.removeOrbit(String(a.id))
-          else s.clearOrbits()
-          break
-        case 'effect':
-          s.fireEffect(a.kind)
-          break
-        case 'reset':
-          s.resetUi()
-          break
-        case 'screen':
-          s.clearScreen(a.what ?? 'all')
-          break
-        default:
-          console.warn('[jarvis] unknown ui op:', op, args)
-      }
-    })
+    watchUi(applyUiOp)
     // In bridge mode the conversation lives in the agent session, which is tied
     // to the socket — so a drop silently wipes his memory while the transcript
     // on screen still shows it. Better to say so than to let him quietly forget.

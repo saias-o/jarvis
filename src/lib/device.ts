@@ -12,6 +12,7 @@ import { appendExchange } from '../../shared/conversation.mjs'
 import type { AskHandlers } from './anthropic'
 import { useStore } from '../store'
 import { diagnostics } from './trace'
+import { applyUiOp } from './uiOps'
 import type { Trace } from '../../shared/trace.mjs'
 
 let active: AbortController | null = null
@@ -95,6 +96,8 @@ export async function ask(prompt: string, handlers: AskHandlers, files: string[]
       ...request, responseType: binary ? 'blob' : 'text', disableRedirects: true, connectTimeout: 10_000, readTimeout: 20_000,
     })
     const phone = await androidTools(JarvisFiles, {
+      // The same interface as on the PC, redressed by the same ui_* tools.
+      ui: applyUiOp,
       show: async (blade) => {
         // The page may only load images from the PC bridge or from its own
         // data. Without the PC, a picture from the web is fetched natively; a

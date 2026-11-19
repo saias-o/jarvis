@@ -19,6 +19,7 @@
  * @property {(from: string, to: string, options?: { signal?: AbortSignal }) => Promise<unknown>} [move]  Must never replace a destination.
  * @property {(target: string) => Promise<unknown>} [open]
  * @property {(blade: object) => unknown} [show]  Puts a blade on the interface.
+ * @property {(op: string, args: object) => unknown} [ui]  Hands an operation to the interface; see ui-tools.mjs.
  * @property {Function} [http]  Transport for the web tools; see web-tools.mjs.
  * @property {(command: string, options: { signal?: AbortSignal }) => Promise<string>} [shell]
  */
@@ -26,6 +27,7 @@
 import { webTools } from './web-tools.mjs'
 import { validatedTool } from './tool-validation.mjs'
 import { memoryStore } from './memory.mjs'
+import { uiTools } from './ui-tools.mjs'
 
 const DOCUMENTS = new Set([
   'pdf', 'doc', 'docx', 'odt', 'ods', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'rtf',
@@ -163,5 +165,6 @@ export function deviceTools(platform, { page = 5000 } = {}) {
     })
   }
 
-  return tools.map(validatedTool)
+  // The interface tools normalise their own forgiving arguments (ui-tools.mjs).
+  return [...tools.map(validatedTool), ...(platform.ui ? uiTools(platform.ui) : [])]
 }

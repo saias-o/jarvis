@@ -129,7 +129,7 @@ test('Gemma selects and uses PC tools through the bridge while inference stays o
   }, { http: () => {}, show: (blade) => shown.push(blade), context: LOCAL_CONTEXT_BYTES })
   const catalogue = androidCatalogue(phone, pc)
   const steps = [
-    { name: 'select_device_tools', arguments: { device: 'pc' } },
+    { name: 'select_tools', arguments: { group: 'pc' } },
     { name: 'pc_read_file', arguments: { path: input } },
     { name: 'show', arguments: { image } },
   ]
@@ -151,7 +151,7 @@ test('Gemma selects and uses PC tools through the bridge while inference stays o
   assert.equal(answer, 'Done.')
   assert.deepEqual(calls, ['/health', '/pc-tools', '/pc-tools'])
   assert.equal(shown[0].url, image)
-  assert.ok(!catalogue.offer(catalogue.tools.map((tool) => ({ function: tool })), false).some((s) => s.function.name === 'select_device_tools'))
+  assert.ok(!catalogue.offer(catalogue.tools.map((tool) => ({ function: tool })), false).some((s) => s.function.name === 'select_tools'))
   catalogue.updatePc({ tools: [], system: '' })
   const offline = catalogue.offer(catalogue.tools.map((tool) => ({ function: tool })), true)
   assert.deepEqual(offline.map((s) => s.function.name), phone.tools.map((t) => t.name))
@@ -301,20 +301,22 @@ const specsOf = (tools) => tools.map(({ name, description, parameters }) => ({ t
 const fullMemory = async () => ({ text: '# Memory\n\n' + Array.from({ length: 60 }, (_, i) =>
   `- 2026-11-${String(i % 28 + 1).padStart(2, '0')} : L’utilisateur préfère « Évan », fait n°${i}.`).join('\n') })
 
-test('on-device Gemma reads a PC or phone page in either tool group, with a full memory', async () => {
+test('on-device Gemma reads a PC or phone page, or redresses the interface, in each tool group, with a full memory', async () => {
   const roots = ['Documents', 'Downloads', 'Pictures'].map((name) => join(dir, 'OneDrive', name))
   for (const root of roots) await mkdir(root, { recursive: true })
   const server = serverTools({ allowWrites: true, shell: true, cwd: roots[0], roots,
     folders: { MyDocuments: roots[0], MyPictures: roots[2] } })
   const pc = await pcTools(async () => Response.json(server.manifest), 'http://100.64.0.1:8788', {}, () => '', undefined, undefined, () => true)
   const phone = await androidTools({ status: async () => ({ root: '/storage/emulated/0', inbox: '/data/user/0/dev.jarvis.app/files/inbox', granted: true }),
-    readMemory: fullMemory }, { show: () => {}, http: () => {}, context: LOCAL_CONTEXT_BYTES - size(pc.system) - 400 })
+    readMemory: fullMemory }, { show: () => {}, ui: () => {}, http: () => {}, context: LOCAL_CONTEXT_BYTES - size(pc.system) - 400 })
   const catalogue = androidCatalogue(phone, pc)
-  const select = catalogue.tools.find((tool) => tool.name === 'select_device_tools')
+  const select = catalogue.tools.find((tool) => tool.name === 'select_tools')
   // The compact PC page is 600 characters; accents make it up to twice as many bytes.
   const page = 'é'.repeat(600) + '\n[4400 more characters; read on with from=600]'
-  for (const [device, read] of [['android', 'read_file'], ['pc', 'pc_read_file']]) {
-    await select.run({ device })
+  const path = { path: join(roots[0], 'rapport trimestriel.txt') }
+  for (const [group, read, args, result] of [['android', 'read_file', path, page], ['pc', 'pc_read_file', path, page],
+    ['interface', 'ui_theme', { accent: '#ff2d2d' }, 'Interface retinted.']]) {
+    await select.run({ group })
     const system = catalogue.localSystem()
     const offered = catalogue.offer(specsOf(catalogue.tools), true)
     assert.ok(offered.some((spec) => spec.function.name === read))
@@ -324,10 +326,10 @@ test('on-device Gemma reads a PC or phone page in either tool group, with a full
     const turn = [
       { role: 'system', content: system },
       { role: 'user', content: 'Lis le rapport trimestriel dans mes documents et résume-moi les trois points principaux, s’il te plaît.' },
-      { role: 'assistant', content: '', tool_calls: [{ function: { name: read, arguments: { path: join(roots[0], 'rapport trimestriel.txt') } } }] },
-      { role: 'tool', tool_name: read, content: page },
+      { role: 'assistant', content: '', tool_calls: [{ function: { name: read, arguments: args } }] },
+      { role: 'tool', tool_name: read, content: result },
     ]
-    assert.deepEqual(fitContext(turn, offered), turn, `${device}: ${size(system) + size(offered)} bytes of prompt and schemas`)
+    assert.deepEqual(fitContext(turn, offered), turn, `${group}: ${size(system) + size(offered)} bytes of prompt and schemas`)
   }
   // Without the small window, PC inference keeps a longer memory and every schema.
   assert.ok(size(catalogue.system) > size(catalogue.localSystem()))
@@ -358,7 +360,7 @@ test('PC inference failing mid-turn continues on Gemma with the PC tools it stil
     async *remote(_messages, specs) {
       // PC inference sees both devices and no group selector.
       assert.ok(specs.some((spec) => spec.function.name === 'pc_read_file'))
-      assert.ok(!specs.some((spec) => spec.function.name === 'select_device_tools'))
+      assert.ok(!specs.some((spec) => spec.function.name === 'select_tools'))
       if (remoteSteps++ === 0) { yield { message: { tool_calls: [{ function: { name: 'remember', arguments: { fact: 'Évan range ses rapports sur le PC.' } } }] } }; return }
       throw new Error('inference service crashed')
     },
@@ -367,7 +369,7 @@ test('PC inference failing mid-turn continues on Gemma with the PC tools it stil
       // The action done before the failure is in the context, not to be repeated.
       assert.ok(messages.some((message) => message.role === 'tool' && message.tool_name === 'remember'))
       const step = localOffers.length
-      if (step === 1) yield { message: { tool_calls: [{ function: { name: 'select_device_tools', arguments: { device: 'pc' } } }] } }
+      if (step === 1) yield { message: { tool_calls: [{ function: { name: 'select_tools', arguments: { group: 'pc' } } }] } }
       else if (step === 2) yield { message: { tool_calls: [{ function: { name: 'pc_read_file', arguments: { path: target } } }] } }
       else {
         assert.equal(messages.at(-1).content, 'Contenu du PC.')
@@ -385,7 +387,7 @@ test('PC inference failing mid-turn continues on Gemma with the PC tools it stil
   assert.equal(writes, 1)
   assert.match(memory, /^- Évan range ses rapports sur le PC\. \(/m)
   assert.equal(fallbacks, 1)
-  assert.ok(localOffers[0].includes('select_device_tools') && !localOffers[0].includes('pc_read_file'))
+  assert.ok(localOffers[0].includes('select_tools') && !localOffers[0].includes('pc_read_file'))
   assert.ok(localOffers[1].includes('pc_read_file'))
 })
 

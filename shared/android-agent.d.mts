@@ -34,6 +34,8 @@ export function androidTools(files: {
 }, platform?: {
   /** Puts a blade on the interface; an image blade's url is a PC path or a web address. */
   show?: (blade: { id: string; title: string; kind: 'markup' | 'image'; html?: string; url?: string; size: 'compact' | 'full'; hold: 'turn' }) => unknown
+  /** Hands one ui_* operation to the interface (shared/ui-tools.mjs). */
+  ui?: (op: string, args: unknown) => unknown
   http?: WebHttp
   /** The thinking model's whole context in bytes, when it is small. */
   context?: number

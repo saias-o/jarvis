@@ -32,8 +32,9 @@ const MAX_READ_BYTES = 4 * 1024 * 1024
  * @param {string[]} opts.roots   The only folders the file tools may touch.
  * @param {boolean} [opts.shell]  Offer `run_command` (needs allowWrites too).
  * @param {(blade:object)=>void} [opts.show]  Puts a blade on the interface.
+ * @param {(op:string, args:object)=>void} [opts.ui]  Redresses the interface (ui_* tools).
  */
-export function localTools({ allowWrites = false, cwd, roots, shell = false, show, page } = {}) {
+export function localTools({ allowWrites = false, cwd, roots, shell = false, show, ui, page } = {}) {
   /** The absolute path, or a thrown sentence saying why not. */
   const vet = (asked) => {
     if (typeof asked !== 'string' || !asked.trim()) throw new Error('no path was given')
@@ -68,6 +69,7 @@ export function localTools({ allowWrites = false, cwd, roots, shell = false, sho
     },
     memory: memoryFile,
     show,
+    ui,
     http: webExchange,
   }
 

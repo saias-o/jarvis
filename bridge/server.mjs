@@ -21,6 +21,7 @@ import { createInference } from './inference.mjs'
 import { pcTools } from './pc-tools.mjs'
 import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
+import { UI_TOOLS } from '../shared/ui-tools.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { memoryPrompt, memoryServer, MEMORY_FILE, MEMORY_TOOLS } from './memory.mjs'
@@ -1939,12 +1940,14 @@ const onConnection = (socket) => {
     roots: TOOL_ROOTS,
     shell: LOCAL_SHELL,
     show: (blade) => send({ type: 'blade', blade }),
+    // The interface is redressed by the shared ui_* tools, whichever model asks.
+    ...(DISABLED.has('interface') ? {} : { ui: (op, args) => send({ type: 'ui', op, args }) }),
   })
   const host = { ...androidPcTools.manifest, cwd: WORKSPACE }
   const capabilityContext = agentContext({ tools: localToolset, host })
 
   /** Tools that are JARVIS keeping house, not work the user is waiting on. */
-  const QUIET_LOCAL_TOOLS = new Set(['remember', 'forget', 'show'])
+  const QUIET_LOCAL_TOOLS = new Set(['remember', 'forget', 'show', ...UI_TOOLS])
 
   /**
    * One question, answered by the local model.
@@ -2093,8 +2096,8 @@ const onConnection = (socket) => {
     // connection rather than once.
     mcpServers: {
       ...MCP_SERVERS,
-      // remember and forget travel under jarvis_memory, once: the same entries, not a second copy.
-      jarvis_device: deviceServer(localToolset.filter((entry) => !MEMORY_TOOLS.has(entry.name))),
+      // remember, forget and ui_* travel under jarvis_memory and jarvis_ui, once: the same entries, not a second copy.
+      jarvis_device: deviceServer(localToolset.filter((entry) => !MEMORY_TOOLS.has(entry.name) && !UI_TOOLS.has(entry.name))),
       jarvis: displayServer(
         (blade) => send({ type: 'blade', blade }),
         { camera: !DISABLED.has('camera') },
@@ -2105,7 +2108,7 @@ const onConnection = (socket) => {
       // both name `jarvis_ui` explicitly.
       ...(DISABLED.has('interface')
         ? {}
-        : { jarvis_ui: uiServer((op, args) => send({ type: 'ui', op, args })) }),
+        : { jarvis_ui: uiServer(localToolset) }),
       // The user's own Chrome, over the extension's native-host socket. It
       // holds no per-connection state, but it is built here with the rest so
       // the write gate is read once, at the same point as everything else.

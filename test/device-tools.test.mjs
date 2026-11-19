@@ -45,14 +45,15 @@ const DDG = `<div class="result results_links"><h2 class="result__title">
 test('the phone and the PC offer the same tools, from the same definitions', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'jarvis-catalogue-'))
   try {
-    const phone = await androidTools(phoneFiles(), { show: () => {}, http: async () => ({}) })
-    const pc = localTools({ allowWrites: true, cwd: dir, roots: [dir], show: () => {} })
+    const phone = await androidTools(phoneFiles(), { show: () => {}, ui: () => {}, http: async () => ({}) })
+    const pc = localTools({ allowWrites: true, cwd: dir, roots: [dir], show: () => {}, ui: () => {} })
     const spec = (tools) => tools.map(({ name, description, parameters }) => ({ name, description, parameters }))
     assert.deepEqual(spec(phone.tools), spec(pc))
     assert.deepEqual(phone.tools.map((tool) => tool.name),
-      ['list_files', 'read_file', 'write_file', 'move_file', 'open', 'remember', 'forget', 'show', 'web_search', 'web_fetch'])
+      ['list_files', 'read_file', 'write_file', 'move_file', 'open', 'remember', 'forget', 'show', 'web_search', 'web_fetch',
+        'ui_theme', 'ui_reactor', 'ui_orbit', 'ui_chrome', 'ui_effect', 'ui_screen', 'ui_reset'])
     // The shell is the one capability only a computer has, and only on request.
-    const shell = localTools({ allowWrites: true, cwd: dir, roots: [dir], show: () => {}, shell: true })
+    const shell = localTools({ allowWrites: true, cwd: dir, roots: [dir], show: () => {}, ui: () => {}, shell: true })
     assert.deepEqual(shell.map((tool) => tool.name).filter((name) => !phone.tools.some((tool) => tool.name === name)), ['run_command'])
     assert.match(phone.system, /web_search/)
   } finally {

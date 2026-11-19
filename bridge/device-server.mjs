@@ -1,10 +1,23 @@
 /** Protocol adapter only: Claude receives the very same executable catalogue. */
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
+import { UI_TOOLS } from '../shared/ui-tools.mjs'
+
+/**
+ * The catalogue's JSON schema as the SDK's zod shape. The forgiving ui_* tools
+ * keep their types for the model, but a malformed value becomes an absent one,
+ * which the tool then ignores instead of the turn failing.
+ */
+function shape(entry) {
+  const fields = z.fromJSONSchema(entry.parameters).shape
+  if (!UI_TOOLS.has(entry.name)) return fields
+  return Object.fromEntries(Object.entries(fields).map(([key, field]) => [key, field.optional().catch(undefined)]))
+}
 
 export function sdkDeviceTools(catalogue) {
-  return catalogue.map((entry) => tool(entry.name, entry.description,
-    z.fromJSONSchema(entry.parameters).shape,
+  // A large model also reads an entry's guide: when the capability is worth using.
+  return catalogue.map((entry) => tool(entry.name, entry.guide ? `${entry.description}\n\n${entry.guide}` : entry.description,
+    shape(entry),
     async (args, extra) => {
       try {
         const result = await entry.run(args, { signal: extra?.signal })

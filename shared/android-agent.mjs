@@ -10,6 +10,7 @@ import { agentContext } from './agent-context.mjs'
 import { validatedTool } from './tool-validation.mjs'
 import { boundedChat } from './context-window.mjs'
 import { parseFacts } from './memory.mjs'
+import { UI_TOOLS } from './ui-tools.mjs'
 
 const bytes = (value) => new TextEncoder().encode(JSON.stringify(value)).length
 
@@ -51,52 +52,60 @@ export async function androidRoute({ mode, pcs }, probe) {
   throw new Error('PC injoignable. Vérifiez Tailscale et son adresse dans Réglages Android.')
 }
 
-/** Gemma can switch schema groups during a turn. Larger providers get both groups directly. */
+const GROUPS = { android: 'Android', interface: 'Interface', pc: 'PC' }
+
+/**
+ * The tools of one Android turn, in groups: the phone's files, memory and web
+ * (android), its interface (interface) and the connected PC (pc). Larger
+ * providers get every group directly. On-device Gemma gets one group at a time,
+ * with `show`, and switches with select_tools: every group at once does not fit
+ * its window.
+ */
 export function androidCatalogue(phone, pc) {
   let currentPc = pc
-  const devices = { android: phone.tools, pc: pc.tools }
-  const combined = [...phone.tools, ...pc.tools]
-  const system = [phone.system, pc.system].filter(Boolean).join('\n')
-  if (!pc.tools.length) {
-    const names = new Set(phone.tools.map((tool) => tool.name))
-    return { tools: combined, system, updatePc() {}, localSystem: () => phone.compose(phone.tools, [phone.facts, pc.system], true),
-      offer: (specs) => specs.filter(({ function: fn }) => names.has(fn.name)) }
+  const groups = {
+    android: phone.tools.filter((tool) => !UI_TOOLS.has(tool.name)),
+    interface: phone.tools.filter((tool) => UI_TOOLS.has(tool.name)),
+    pc: pc.tools,
   }
-
   let selected = 'android'
+  const available = () => Object.keys(GROUPS).filter((group) => groups[group].length)
+  const switchable = () => available().length > 1
+  const names = (tools) => tools.map((tool) => tool.name).join(', ')
   const selector = validatedTool({
-    name: 'select_device_tools',
-    description: 'Offer the tools of this device from the next step on. show stays available.',
-    parameters: { type: 'object', properties: { device: { type: 'string', enum: ['android', 'pc'] } }, required: ['device'] },
-    run({ device }) {
-      selected = device
-      return devices[device].map((tool) => tool.name).join(', ')
+    name: 'select_tools',
+    description: 'Offer the tools of this group from the next step on. show stays available.',
+    parameters: { type: 'object', properties: { group: { type: 'string', enum: Object.keys(GROUPS) } }, required: ['group'] },
+    run({ group }) {
+      if (!groups[group].length) throw new Error(`No ${GROUPS[group]} tools are available now.`)
+      selected = group
+      return names(groups[group])
     },
   })
   return {
-    tools: [...combined, selector], system,
-    updatePc(available) {
-      currentPc = available
-      devices.pc = pc.tools.filter((tool) => available.tools.some((other) => other.name === tool.name))
-      if (!devices.pc.length) selected = 'android'
+    tools: [...phone.tools, ...pc.tools, selector],
+    system: [phone.system, pc.system].filter(Boolean).join('\n'),
+    updatePc(reachable) {
+      currentPc = reachable
+      groups.pc = pc.tools.filter((tool) => reachable.tools.some((other) => other.name === tool.name))
+      if (!groups[selected].length) selected = 'android'
     },
-    // Only the selected group's rules and facts: the other group is named so
-    // that the model knows it can switch, without paying for its schemas.
+    // Only the selected group's rules and facts: the other groups are named so
+    // that the model knows it can switch, without paying for their schemas.
     localSystem() {
-      const names = (tools) => tools.map((tool) => tool.name).join(', ')
-      if (!devices.pc.length) return phone.compose(phone.tools, [phone.facts, 'Aucun outil PC disponible.'], true)
-      if (selected === 'android') {
-        return phone.compose([...phone.tools, selector], [phone.facts, `Outils PC après select_device_tools(device=pc) : ${names(devices.pc)}.`], true)
-      }
-      const screen = phone.tools.filter((tool) => tool.name === 'show')
-      return phone.compose([...screen, ...devices.pc, selector],
-        [currentPc.system, `Outils Android après select_device_tools(device=android) : ${names(phone.tools)}.`], true)
+      const hosts = selected === 'pc' ? [currentPc.system] : selected === 'android' ? [phone.facts] : []
+      if (!pc.tools.length) hosts.push(pc.system)
+      else if (!groups.pc.length) hosts.push('Aucun outil PC disponible.')
+      const others = available().filter((group) => group !== selected).map((group) => `${GROUPS[group]} : ${names(groups[group])}`)
+      if (others.length) hosts.push(`Autres outils, après select_tools(group) : ${others.join(' ; ')}.`)
+      const screen = selected === 'android' ? [] : phone.tools.filter((tool) => tool.name === 'show')
+      return phone.compose([...screen, ...groups[selected], ...(switchable() ? [selector] : [])], hosts, true)
     },
     offer(specs, local) {
       if (!local) return specs.filter(({ function: fn }) => fn.name !== selector.name)
-      const names = new Set(['show', ...devices[selected].map((tool) => tool.name)])
-      if (devices.pc.length) names.add(selector.name)
-      return specs.filter(({ function: fn }) => names.has(fn.name))
+      const offered = new Set(['show', ...groups[selected].map((tool) => tool.name)])
+      if (switchable()) offered.add(selector.name)
+      return specs.filter(({ function: fn }) => offered.has(fn.name))
     },
   }
 }
@@ -106,7 +115,7 @@ export function androidCatalogue(phone, pc) {
  *   it is small (on-device Gemma). One tool result is then sized to what the
  *   prompt and the schemas leave free, instead of overflowing the window.
  */
-export async function androidTools(files, { show, http, context, smallContext = () => true } = {}) {
+export async function androidTools(files, { show, ui, http, context, smallContext = () => true } = {}) {
   const storage = await files.status()
   const memory = await files.readMemory()
   const native = async (name, args) => (await files.run({ name, args })).result
@@ -118,7 +127,7 @@ export async function androidTools(files, { show, http, context, smallContext = 
     open: (target) => native('open', { target }),
     // The phone's memory file, whole; the rules are the shared ones.
     memory: { read: async () => (await files.readMemory()).text, write: (text) => files.writeMemory({ text }) },
-    show, http,
+    show, ui, http,
   }
   const tools = deviceTools(platform)
   const intro = `JARVIS sur le téléphone Android. Réponds brièvement en français. ${new Date().toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })}.
@@ -133,7 +142,9 @@ Les outils sans préfixe agissent sur le téléphone.`
   if (!context) return { tools, system, facts, compose }
   // Leave room for the question, the calls and an earlier result cut short;
   // accented text and JSON escapes make a character slightly more than a byte.
-  const fixed = bytes(compose(tools, [facts], true)) + bytes(tools.map(({ name, description, parameters }) => ({ type: 'function', function: { name, description, parameters } })))
+  // Sized for the files group, the one whose results are pages.
+  const fileTools = tools.filter((tool) => !UI_TOOLS.has(tool.name))
+  const fixed = bytes(compose(fileTools, [facts], true)) + bytes(fileTools.map(({ name, description, parameters }) => ({ type: 'function', function: { name, description, parameters } })))
   const paged = deviceTools(platform, { page: (context - fixed - 800) * 0.9 })
   return { tools: tools.map((tool, i) => ({
     ...tool,
