@@ -10,6 +10,7 @@
  */
 
 import { vetTarget } from './public-web.mjs'
+import { articleBody, readableText, stripDangerous, titleOf } from './readable.mjs'
 
 const UA = 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36'
 const MAX_REDIRECTS = 4
@@ -84,6 +85,7 @@ async function request(http, raw, { method = 'GET', headers = {}, data, binary =
     return {
       status, url: url.href,
       type: String(header('content-type') ?? '').split(';')[0].trim().toLowerCase(),
+      bytes: Number(header('content-length')) || undefined,
       // Capacitor parses JSON bodies itself; everything else arrives as text.
       text: typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? ''),
     }
@@ -120,6 +122,49 @@ export async function webImage(http, url, { signal, maxBytes = 6 * 1024 * 1024 }
   const base64 = image.text.replace(/\s+/g, '')
   if (base64.length * 0.75 > maxBytes) throw new Error('that image is too large to show')
   return `data:${image.type};base64,${base64}`
+}
+
+/**
+ * What is at a URL, before it is put on screen: its kind, whether it answers,
+ * and for a page its title, how much prose it holds and its lead image. The
+ * `suggestion` is advice from something that has only seen the bytes.
+ */
+export async function webProbe(http, url, { signal } = {}) {
+  let head
+  try {
+    // HEAD first, so a picture or a video is not downloaded to learn its type.
+    head = await request(http, url, { method: 'HEAD', signal }).catch(() => null)
+    if (!head || head.status >= 400 || !head.type) head = await request(http, url, { signal })
+  } catch (error) {
+    signal?.throwIfAborted()
+    return { ok: false, url, reason: error?.message ?? String(error), suggestion: 'unavailable' }
+  }
+  const type = head.type
+  const kind = /^image\//.test(type) ? 'image' : /^video\//.test(type) ? 'video' : /^audio\//.test(type) ? 'audio'
+    : /^application\/pdf/.test(type) ? 'pdf' : /^text\/html|^application\/xhtml/.test(type) ? 'page' : 'other'
+  const base = { ok: head.status === 200, url: head.url, status: head.status, contentType: type, bytes: head.bytes, kind }
+  if (kind === 'image') return { ...base, suggestion: base.ok ? 'blade_image' : 'unavailable' }
+  if (kind === 'video' || kind === 'audio') return { ...base, suggestion: base.ok ? 'blade_video' : 'unavailable' }
+  if (kind === 'pdf') return { ...base, suggestion: base.ok ? 'blade_pdf' : 'unavailable' }
+  if (kind !== 'page' || !base.ok) return { ...base, suggestion: base.ok ? 'speak_only' : 'unavailable' }
+  try {
+    const page = head.text ? head : await request(http, head.url, { signal })
+    // Measured as the reading view measures, so a reader is only suggested when it will have words in it.
+    const readable = readableText(articleBody(stripDangerous(page.text)))
+    return {
+      ...base,
+      title: titleOf(page.text),
+      readableChars: readable.length,
+      leadImage: pageImage(page.text, page.url) || null,
+      excerpt: readable.slice(0, 300),
+      // Enough prose to read gets the reading view; a page that is mostly
+      // interface is only itself when it looks like itself.
+      suggestion: readable.length > 900 ? 'blade_reader' : 'blade_live',
+    }
+  } catch (error) {
+    signal?.throwIfAborted()
+    return { ...base, suggestion: 'blade_live', reason: error?.message ?? String(error) }
+  }
 }
 
 async function duckduckgo(http, query, signal) {

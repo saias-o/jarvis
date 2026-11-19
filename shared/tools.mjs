@@ -20,14 +20,16 @@
  * @property {(target: string) => Promise<unknown>} [open]
  * @property {(blade: object) => unknown} [show]  Puts a blade on the interface.
  * @property {(op: string, args: object) => unknown} [ui]  Hands an operation to the interface; see ui-tools.mjs.
+ * @property {boolean} [camera]  Whether a blade may open the live camera view here.
  * @property {Function} [http]  Transport for the web tools; see web-tools.mjs.
  * @property {(command: string, options: { signal?: AbortSignal }) => Promise<string>} [shell]
  */
 
-import { webTools } from './web-tools.mjs'
+import { webProbe, webTools } from './web-tools.mjs'
 import { validatedTool } from './tool-validation.mjs'
 import { memoryStore } from './memory.mjs'
 import { uiTools } from './ui-tools.mjs'
+import { displayTools } from './display-tools.mjs'
 
 const DOCUMENTS = new Set([
   'pdf', 'doc', 'docx', 'odt', 'ods', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'rtf',
@@ -154,6 +156,13 @@ export function deviceTools(platform, { page = 5000 } = {}) {
     })
   }
 
+  // The richer screen tools draw on the same primitive as show.
+  if (platform.show) {
+    tools.push(...displayTools({ show: platform.show, camera: platform.camera,
+      probe: platform.http && ((url, options) => webProbe(platform.http, url, options)) }))
+  }
+  if (platform.ui) tools.push(...uiTools(platform.ui))
+
   if (platform.http) tools.push(...webTools(platform.http, { limit: page }))
 
   if (platform.shell) {
@@ -165,6 +174,6 @@ export function deviceTools(platform, { page = 5000 } = {}) {
     })
   }
 
-  // The interface tools normalise their own forgiving arguments (ui-tools.mjs).
-  return [...tools.map(validatedTool), ...(platform.ui ? uiTools(platform.ui) : [])]
+  // Forgiving tools (screen, interface) normalise their own arguments.
+  return tools.map((tool) => (tool.forgiving ? tool : validatedTool(tool)))
 }

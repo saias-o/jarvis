@@ -11,6 +11,7 @@ import { validatedTool } from './tool-validation.mjs'
 import { boundedChat } from './context-window.mjs'
 import { parseFacts } from './memory.mjs'
 import { UI_TOOLS } from './ui-tools.mjs'
+import { DISPLAY_TOOLS } from './display-tools.mjs'
 
 const bytes = (value) => new TextEncoder().encode(JSON.stringify(value)).length
 
@@ -52,11 +53,18 @@ export async function androidRoute({ mode, pcs }, probe) {
   throw new Error('PC injoignable. Vérifiez Tailscale et son adresse dans Réglages Android.')
 }
 
-const GROUPS = { android: 'Android', interface: 'Interface', pc: 'PC' }
+/** What each group is for, so the model knows where to switch without paying for the schemas. */
+const GROUPS = {
+  android: 'fichiers, mémoire et web du téléphone',
+  display: 'panneaux, articles, galeries, vidéos et PDF à l’écran',
+  interface: 'couleurs, réacteur, orbites et effets de l’interface',
+  pc: 'fichiers, commandes et transferts du PC',
+}
 
 /**
  * The tools of one Android turn, in groups: the phone's files, memory and web
- * (android), its interface (interface) and the connected PC (pc). Larger
+ * (android), its richer screen tools (display), its interface (interface) and
+ * the connected PC (pc). Larger
  * providers get every group directly. On-device Gemma gets one group at a time,
  * with `show`, and switches with select_tools: every group at once does not fit
  * its window.
@@ -64,7 +72,8 @@ const GROUPS = { android: 'Android', interface: 'Interface', pc: 'PC' }
 export function androidCatalogue(phone, pc) {
   let currentPc = pc
   const groups = {
-    android: phone.tools.filter((tool) => !UI_TOOLS.has(tool.name)),
+    android: phone.tools.filter((tool) => !UI_TOOLS.has(tool.name) && !DISPLAY_TOOLS.has(tool.name)),
+    display: phone.tools.filter((tool) => DISPLAY_TOOLS.has(tool.name)),
     interface: phone.tools.filter((tool) => UI_TOOLS.has(tool.name)),
     pc: pc.tools,
   }
@@ -77,7 +86,7 @@ export function androidCatalogue(phone, pc) {
     description: 'Offer the tools of this group from the next step on. show stays available.',
     parameters: { type: 'object', properties: { group: { type: 'string', enum: Object.keys(GROUPS) } }, required: ['group'] },
     run({ group }) {
-      if (!groups[group].length) throw new Error(`No ${GROUPS[group]} tools are available now.`)
+      if (!groups[group].length) throw new Error(`The ${group} tools are not available now.`)
       selected = group
       return names(groups[group])
     },
@@ -96,8 +105,8 @@ export function androidCatalogue(phone, pc) {
       const hosts = selected === 'pc' ? [currentPc.system] : selected === 'android' ? [phone.facts] : []
       if (!pc.tools.length) hosts.push(pc.system)
       else if (!groups.pc.length) hosts.push('Aucun outil PC disponible.')
-      const others = available().filter((group) => group !== selected).map((group) => `${GROUPS[group]} : ${names(groups[group])}`)
-      if (others.length) hosts.push(`Autres outils, après select_tools(group) : ${others.join(' ; ')}.`)
+      const others = available().filter((group) => group !== selected).map((group) => `${group} = ${GROUPS[group]}`)
+      if (others.length) hosts.push(`Autres groupes, via select_tools : ${others.join(' ; ')}.`)
       const screen = selected === 'android' ? [] : phone.tools.filter((tool) => tool.name === 'show')
       return phone.compose([...screen, ...groups[selected], ...(switchable() ? [selector] : [])], hosts, true)
     },
@@ -143,7 +152,7 @@ Les outils sans préfixe agissent sur le téléphone.`
   // Leave room for the question, the calls and an earlier result cut short;
   // accented text and JSON escapes make a character slightly more than a byte.
   // Sized for the files group, the one whose results are pages.
-  const fileTools = tools.filter((tool) => !UI_TOOLS.has(tool.name))
+  const fileTools = tools.filter((tool) => !UI_TOOLS.has(tool.name) && !DISPLAY_TOOLS.has(tool.name))
   const fixed = bytes(compose(fileTools, [facts], true)) + bytes(fileTools.map(({ name, description, parameters }) => ({ type: 'function', function: { name, description, parameters } })))
   const paged = deviceTools(platform, { page: (context - fixed - 800) * 0.9 })
   return { tools: tools.map((tool, i) => ({

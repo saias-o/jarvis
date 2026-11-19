@@ -50,8 +50,8 @@ test('the phone and the PC offer the same tools, from the same definitions', asy
     const spec = (tools) => tools.map(({ name, description, parameters }) => ({ name, description, parameters }))
     assert.deepEqual(spec(phone.tools), spec(pc))
     assert.deepEqual(phone.tools.map((tool) => tool.name),
-      ['list_files', 'read_file', 'write_file', 'move_file', 'open', 'remember', 'forget', 'show', 'web_search', 'web_fetch',
-        'ui_theme', 'ui_reactor', 'ui_orbit', 'ui_chrome', 'ui_effect', 'ui_screen', 'ui_reset'])
+      ['list_files', 'read_file', 'write_file', 'move_file', 'open', 'remember', 'forget', 'show', 'display', 'blade', 'probe_url',
+        'ui_theme', 'ui_reactor', 'ui_orbit', 'ui_chrome', 'ui_effect', 'ui_screen', 'ui_reset', 'web_search', 'web_fetch'])
     // The shell is the one capability only a computer has, and only on request.
     const shell = localTools({ allowWrites: true, cwd: dir, roots: [dir], show: () => {}, ui: () => {}, shell: true })
     assert.deepEqual(shell.map((tool) => tool.name).filter((name) => !phone.tools.some((tool) => tool.name === name)), ['run_command'])
@@ -214,4 +214,31 @@ test('a cancelled turn stops waiting for a transport that cannot be cancelled', 
 test('markup becomes plain words', () => {
   assert.equal(htmlToText('<div>Un&nbsp;&laquo;&nbsp;test&nbsp;&raquo;<br>ligne <b>deux</b></div><!-- x --><p>&#128512; &unknown;</p>'),
     'Un « test »\nligne deux\n😀 &unknown;')
+})
+
+test('probe_url says what is at an address the way the reading view will see it, on any device', async () => {
+  const prose = `<html><head><title>Le rapport</title><meta property="og:image" content="https://cdn.example/lead.jpg"></head>
+<body><nav>${'<a href="/x">lien</a> '.repeat(50)}</nav><article>${'<p>Une phrase complète avec assez de mots pour compter comme de la prose réelle.</p>'.repeat(20)}</article></body></html>`
+  const links = `<html><head><title>Liens</title></head><body>${'<li><a href="/a">Un lien parmi tant d’autres sur cette page</a></li>'.repeat(200)}</body></html>`
+  const { http, asked } = scripted({
+    'https://cdn.example/photo': (request) => ({ status: 200, headers: { 'Content-Type': 'image/jpeg', 'Content-Length': '2048' }, data: request.method === 'HEAD' ? '' : 'binary' }),
+    'https://news.example/article': (request) => request.method === 'HEAD'
+      ? { status: 405, headers: {}, data: '' } : { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' }, data: prose },
+    'https://news.example/links': { status: 200, headers: { 'content-type': 'text/html' }, data: links },
+  })
+  const tools = deviceTools({ list: async () => [], read: async () => ({ text: '', total: 0 }), show: () => {}, http })
+  const probe = async (url) => JSON.parse(await tools.find((tool) => tool.name === 'probe_url').run({ url }))
+
+  assert.deepEqual(await probe('https://cdn.example/photo'), { ok: true, url: 'https://cdn.example/photo', status: 200,
+    contentType: 'image/jpeg', bytes: 2048, kind: 'image', suggestion: 'blade_image' })
+  // A picture is never downloaded to learn its type.
+  assert.deepEqual(asked.filter((r) => r.url === 'https://cdn.example/photo').map((r) => r.method), ['HEAD'])
+  const article = await probe('https://news.example/article')
+  assert.equal(article.suggestion, 'blade_reader')
+  assert.equal(article.title, 'Le rapport')
+  assert.equal(article.leadImage, 'https://cdn.example/lead.jpg')
+  assert.ok(article.readableChars > 900)
+  // Link text is not prose: the reading view would open on nothing.
+  assert.equal((await probe('https://news.example/links')).suggestion, 'blade_live')
+  assert.match((await probe('http://192.168.1.1/')).reason, /blocked host/)
 })

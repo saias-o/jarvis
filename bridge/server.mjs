@@ -22,6 +22,7 @@ import { pcTools } from './pc-tools.mjs'
 import { displayServer } from './panels.mjs'
 import { uiServer } from './ui.mjs'
 import { UI_TOOLS } from '../shared/ui-tools.mjs'
+import { DISPLAY_TOOLS } from '../shared/display-tools.mjs'
 import { chromeAvailable, chromeServer } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { memoryPrompt, memoryServer, MEMORY_FILE, MEMORY_TOOLS } from './memory.mjs'
@@ -1942,12 +1943,13 @@ const onConnection = (socket) => {
     show: (blade) => send({ type: 'blade', blade }),
     // The interface is redressed by the shared ui_* tools, whichever model asks.
     ...(DISABLED.has('interface') ? {} : { ui: (op, args) => send({ type: 'ui', op, args }) }),
+    camera: !DISABLED.has('camera'),
   })
   const host = { ...androidPcTools.manifest, cwd: WORKSPACE }
   const capabilityContext = agentContext({ tools: localToolset, host })
 
   /** Tools that are JARVIS keeping house, not work the user is waiting on. */
-  const QUIET_LOCAL_TOOLS = new Set(['remember', 'forget', 'show', ...UI_TOOLS])
+  const QUIET_LOCAL_TOOLS = new Set(['remember', 'forget', 'show', 'display', ...UI_TOOLS])
 
   /**
    * One question, answered by the local model.
@@ -2096,12 +2098,11 @@ const onConnection = (socket) => {
     // connection rather than once.
     mcpServers: {
       ...MCP_SERVERS,
-      // remember, forget and ui_* travel under jarvis_memory and jarvis_ui, once: the same entries, not a second copy.
-      jarvis_device: deviceServer(localToolset.filter((entry) => !MEMORY_TOOLS.has(entry.name) && !UI_TOOLS.has(entry.name))),
-      jarvis: displayServer(
-        (blade) => send({ type: 'blade', blade }),
-        { camera: !DISABLED.has('camera') },
-      ),
+      // remember, forget, the screen and ui_* tools travel under jarvis_memory,
+      // jarvis and jarvis_ui, once: the same entries, not a second copy.
+      jarvis_device: deviceServer(localToolset.filter((entry) =>
+        !MEMORY_TOOLS.has(entry.name) && !UI_TOOLS.has(entry.name) && !DISPLAY_TOOLS.has(entry.name))),
+      jarvis: displayServer(localToolset),
       // The interface controls, on the same socket. A separate key because
       // MCP tool names are `mcp__<key>__<tool>` and one key can only carry
       // one server; the underscore in it is why decideTool and announceTool

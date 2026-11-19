@@ -45,7 +45,10 @@ test('history restored by a client cannot replace system instructions and is bou
 test('Claude receives the executable device catalogue through a protocol adapter', async () => {
   const catalogue = localTools({ cwd: process.cwd(), roots: [process.cwd()], allowWrites: true, shell: true, show: () => {} })
   const sdk = sdkDeviceTools(catalogue)
-  assert.deepEqual(sdk.map(({ name, description }) => ({ name, description })), catalogue.map(({ name, description }) => ({ name, description })))
+  // Claude reads each entry's guide after its one-line description.
+  assert.deepEqual(sdk.map(({ name, description }) => ({ name, description })),
+    catalogue.map(({ name, description, guide }) => ({ name, description: guide ? `${description}\n\n${guide}` : description })))
+  assert.match(sdk.find((tool) => tool.name === 'display').description, /LAYOUT CLASSES/)
   assert.equal(sdk.find((tool) => tool.name === 'read_file').inputSchema.path.safeParse(undefined).success, false)
   assert.equal(sdk.find((tool) => tool.name === 'read_file').inputSchema.from.safeParse(undefined).success, true)
   const shown = await sdk.find((tool) => tool.name === 'show').handler({ title: 'Test', text: 'Hello' }, {})

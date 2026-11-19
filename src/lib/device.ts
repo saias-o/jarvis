@@ -10,7 +10,7 @@ import { CapacitorHttp } from '@capacitor/core'
 import { webImage, type WebHttp } from '../../shared/web-tools.mjs'
 import { appendExchange } from '../../shared/conversation.mjs'
 import type { AskHandlers } from './anthropic'
-import { useStore } from '../store'
+import { useStore, type Blade } from '../store'
 import { diagnostics } from './trace'
 import { applyUiOp } from './uiOps'
 import type { Trace } from '../../shared/trace.mjs'
@@ -95,18 +95,31 @@ export async function ask(prompt: string, handlers: AskHandlers, files: string[]
     const http: WebHttp = ({ binary, ...request }) => CapacitorHttp.request({
       ...request, responseType: binary ? 'blob' : 'text', disableRedirects: true, connectTimeout: 10_000, readTimeout: 20_000,
     })
+    /**
+     * The page may only load media from the PC bridge, its own data and the
+     * video players its policy names. Without the PC, a picture from the web is
+     * fetched natively; an article, a video file or a PDF outside Drive goes
+     * through the bridge and is refused with the reason, never shown blank.
+     */
+    const withoutPc = async <T extends { kind: string; url?: string; images?: string[] }>(blade: T): Promise<T> => {
+      const signal = controller.signal
+      const picture = (url = '') => {
+        if (!/^https?:\/\//i.test(url)) throw new Error('Connect the PC to show a file stored on the PC')
+        return webImage(http, url, { signal })
+      }
+      if (blade.kind === 'image') return { ...blade, url: await picture(blade.url) }
+      if (blade.kind === 'gallery') return { ...blade, images: await Promise.all((blade.images ?? []).map((url) => picture(url))) }
+      if (blade.kind === 'article' || blade.kind === 'video' || (blade.kind === 'pdf' && !/^https:\/\/drive\.google\.com\//i.test(blade.url ?? ''))) {
+        throw new Error(`Connect the PC to open this ${blade.kind}: the phone loads it through the PC bridge. show and web_fetch work without it.`)
+      }
+      return blade
+    }
     const phone = await androidTools(JarvisFiles, {
       // The same interface as on the PC, redressed by the same ui_* tools.
       ui: applyUiOp,
       show: async (blade) => {
-        // The page may only load images from the PC bridge or from its own
-        // data. Without the PC, a picture from the web is fetched natively; a
-        // file stored on the PC stays out of reach.
-        if (blade.kind === 'image' && !hostOnline) {
-          if (!/^https?:\/\//i.test(blade.url ?? '')) throw new Error('Connect the PC to show a file stored on the PC')
-          blade = { ...blade, url: await webImage(http, blade.url!, { signal: controller.signal }) }
-        }
-        useStore.getState().pushBlade({ ...blade, trace: context })
+        if (!hostOnline) blade = await withoutPc(blade)
+        useStore.getState().pushBlade({ ...blade, trace: context } as Blade)
       },
       http,
       // On-device Gemma has a 4,096-token window; a PC model reads far more.

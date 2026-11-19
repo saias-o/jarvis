@@ -169,6 +169,7 @@ export function uiTools(ui) {
   return [
     {
       name: 'ui_theme',
+      forgiving: true,
       description: 'Retint the whole interface: accent overrides every phase colour, "auto" gives it back.',
       guide: THEME_GUIDE,
       parameters: object({
@@ -199,6 +200,7 @@ export function uiTools(ui) {
     },
     {
       name: 'ui_reactor',
+      forgiving: true,
       description: 'Reshape the reactor at the centre; omitted properties stay as they are.',
       guide: REACTOR_GUIDE,
       parameters: object({
@@ -225,6 +227,7 @@ export function uiTools(ui) {
     },
     {
       name: 'ui_orbit',
+      forgiving: true,
       description: 'Hang an image you produced or captured in orbit around the reactor, or take orbits down.',
       guide: ORBIT_GUIDE,
       parameters: object({
@@ -279,6 +282,7 @@ export function uiTools(ui) {
     },
     {
       name: 'ui_chrome',
+      forgiving: true,
       description: 'Show (true) or hide (false) the furniture around the display; put it back when the moment is over.',
       guide: CHROME_GUIDE,
       parameters: object({
@@ -304,6 +308,7 @@ export function uiTools(ui) {
     },
     {
       name: 'ui_effect',
+      forgiving: true,
       description: 'Fire one effect across the interface, at most once per turn and only when something happened.',
       guide: EFFECT_GUIDE,
       parameters: object({ kind: { type: 'string', enum: ['glitch', 'pulse', 'scan', 'shake', 'flash'] } }, ['kind']),
@@ -314,6 +319,7 @@ export function uiTools(ui) {
     },
     {
       name: 'ui_screen',
+      forgiving: true,
       description: 'Clear the display: panels (every card), transcript, or all. Theme, reactor and orbits stay.',
       guide: SCREEN_GUIDE,
       parameters: object({ what: { type: 'string', enum: ['all', 'panels', 'transcript'], description: 'Default all.' } }),
@@ -324,6 +330,7 @@ export function uiTools(ui) {
     },
     {
       name: 'ui_reset',
+      forgiving: true,
       description: 'Put colours, reactor, orbits and chrome back to stock. Panels and transcript stay.',
       guide: RESET_GUIDE,
       parameters: object({}),

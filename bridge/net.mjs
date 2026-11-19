@@ -222,29 +222,3 @@ export async function webExchange({ url, method = 'GET', headers = {}, data }) {
   const { text } = await readBody(res, 4 * 1024 * 1024)
   return { status: res.statusCode ?? 0, headers: res.headers, data: text }
 }
-
-/**
- * Headers only, for deciding what a URL *is* before committing to fetching it.
- *
- * Sent as a GET rather than a HEAD, and immediately abandoned: a surprising
- * share of the web answers HEAD with 405, or with headers that disagree with
- * what a real GET would return, and being wrong about the content type is the
- * entire failure this is here to prevent.
- */
-export async function peek(url, { timeoutMs }) {
-  const target = vetTarget(url)
-  const { res, url: finalUrl } = await openRemote(
-    target,
-    { 'user-agent': PROXY_UA, accept: '*/*', 'accept-encoding': 'identity' },
-    timeoutMs,
-  )
-  const out = {
-    status: res.statusCode ?? 0,
-    type: String(res.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase(),
-    bytes: Number(res.headers['content-length']) || null,
-    headers: res.headers,
-    url: finalUrl.href,
-  }
-  res.destroy()
-  return out
-}

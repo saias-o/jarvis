@@ -3,6 +3,9 @@ import type { WebHttp } from './web-tools.mjs'
 export type AndroidRoute = { inference: 'pc' | 'device'; pcUrl: string | null }
 export function androidRoute(settings: { mode: 'auto' | 'pc' | 'device'; pcs: string[] }, probe: (url: string) => Promise<Response>): Promise<AndroidRoute>
 type Catalogue = { tools: Tool[]; system: string }
+/** A blade from show, display or blade (shared/display-tools.mjs). */
+export type ShownBlade = { id: string; title: string; kind: 'article' | 'image' | 'gallery' | 'video' | 'embed' | 'pdf' | 'markup' | 'camera'
+  url?: string; images?: string[]; html?: string; mode?: 'reader' | 'live'; size: 'compact' | 'tall' | 'wide' | 'full'; hold: 'turn' | 'sticky' }
 type PhoneCatalogue = Catalogue & {
   /** Device facts of the phone, for a prompt composed per tool group. */
   facts: string
@@ -33,7 +36,9 @@ export function androidTools(files: {
   run(options: { name: string; args: Record<string, unknown> }): Promise<{ result: string }>
 }, platform?: {
   /** Puts a blade on the interface; an image blade's url is a PC path or a web address. */
-  show?: (blade: { id: string; title: string; kind: 'markup' | 'image'; html?: string; url?: string; size: 'compact' | 'full'; hold: 'turn' }) => unknown
+  show?: (blade: ShownBlade) => unknown
+  /** Whether a blade may open the live camera view on this device. */
+  camera?: boolean
   /** Hands one ui_* operation to the interface (shared/ui-tools.mjs). */
   ui?: (op: string, args: unknown) => unknown
   http?: WebHttp

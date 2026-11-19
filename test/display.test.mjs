@@ -4,10 +4,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { tsImport } from 'tsx/esm/api'
 import { displayServer } from '../bridge/panels.mjs'
+import { displayTools } from '../shared/display-tools.mjs'
 
 test('display and blade still reach the viewer over MCP, including sticky markup and images', async (t) => {
   const blades = []
-  const endpoint = displayServer((blade) => blades.push(blade), { camera: false })
+  const endpoint = displayServer(displayTools({ show: (blade) => blades.push(blade), camera: false }))
   const client = new Client({ name: 'display-check', version: '1.0.0' })
   const [serverWire, clientWire] = InMemoryTransport.createLinkedPair()
   await endpoint.instance.connect(serverWire)

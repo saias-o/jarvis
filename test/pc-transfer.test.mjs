@@ -13,6 +13,7 @@ import { createInference, MAX_TOOLS } from '../bridge/inference.mjs'
 import { agentTurn } from '../shared/agent-loop.mjs'
 import { remoteChat } from '../shared/remote-chat.mjs'
 import { copyExclusive } from '../bridge/move-file.mjs'
+import { DISPLAY_TOOLS } from '../shared/display-tools.mjs'
 
 let dir, child, url
 before(async () => {
@@ -154,7 +155,8 @@ test('Gemma selects and uses PC tools through the bridge while inference stays o
   assert.ok(!catalogue.offer(catalogue.tools.map((tool) => ({ function: tool })), false).some((s) => s.function.name === 'select_tools'))
   catalogue.updatePc({ tools: [], system: '' })
   const offline = catalogue.offer(catalogue.tools.map((tool) => ({ function: tool })), true)
-  assert.deepEqual(offline.map((s) => s.function.name), phone.tools.map((t) => t.name))
+  // The phone's own groups remain, so the selector stays.
+  assert.deepEqual(offline.map((s) => s.function.name), [...phone.tools.map((t) => t.name).filter((name) => !DISPLAY_TOOLS.has(name)), 'select_tools'])
 })
 
 test('PC discovery respects the chosen inference mode and the configured order', async () => {
@@ -301,7 +303,7 @@ const specsOf = (tools) => tools.map(({ name, description, parameters }) => ({ t
 const fullMemory = async () => ({ text: '# Memory\n\n' + Array.from({ length: 60 }, (_, i) =>
   `- 2026-11-${String(i % 28 + 1).padStart(2, '0')} : L’utilisateur préfère « Évan », fait n°${i}.`).join('\n') })
 
-test('on-device Gemma reads a PC or phone page, or redresses the interface, in each tool group, with a full memory', async () => {
+test('on-device Gemma reads a PC or phone page, opens a blade or redresses the interface, in each tool group, with a full memory', async () => {
   const roots = ['Documents', 'Downloads', 'Pictures'].map((name) => join(dir, 'OneDrive', name))
   for (const root of roots) await mkdir(root, { recursive: true })
   const server = serverTools({ allowWrites: true, shell: true, cwd: roots[0], roots,
@@ -315,7 +317,8 @@ test('on-device Gemma reads a PC or phone page, or redresses the interface, in e
   const page = 'é'.repeat(600) + '\n[4400 more characters; read on with from=600]'
   const path = { path: join(roots[0], 'rapport trimestriel.txt') }
   for (const [group, read, args, result] of [['android', 'read_file', path, page], ['pc', 'pc_read_file', path, page],
-    ['interface', 'ui_theme', { accent: '#ff2d2d' }, 'Interface retinted.']]) {
+    ['interface', 'ui_theme', { accent: '#ff2d2d' }, 'Interface retinted.'],
+    ['display', 'blade', { title: 'Rapport', kind: 'pdf', url: 'https://example.com/rapport.pdf' }, 'Open on the blades as "Rapport".']]) {
     await select.run({ group })
     const system = catalogue.localSystem()
     const offered = catalogue.offer(specsOf(catalogue.tools), true)
@@ -403,7 +406,7 @@ test('a fallback with the PC gone offers only the phone, and a manual mode never
     discover: async () => { throw new Error('unreachable') },
     async *local(_messages, specs) { offered.push(...specs.map((spec) => spec.function.name)); yield { message: { content: 'ok' } } } })
   assert.equal(await agentTurn('Bonjour', { tools: catalogue.tools, system: catalogue.system, chat: model.chat }), 'ok')
-  assert.deepEqual(offered, phone.tools.map((tool) => tool.name))
+  assert.deepEqual(offered, [...phone.tools.map((tool) => tool.name).filter((name) => !DISPLAY_TOOLS.has(name)), 'select_tools'])
   assert.match(catalogue.localSystem(), /Aucun outil PC disponible/)
 
   const pinned = androidChat({ inference: 'pc', catalogue: androidCatalogue(phone, pc), remote: fail, canFallback: () => false,
