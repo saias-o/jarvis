@@ -217,7 +217,35 @@ test('an interrupt stops the local answer, and the next question is answered', a
   assert.equal(face.frames.some((f) => f.type === 'done' && f.ask === 'i1'), false)
   // Compared whole so that a failure names the error and the bridge's own log.
   assert.deepEqual(face.frames.filter((f) => f.type === 'error'), [], bridge.log.slice(-2000))
+  // Not one fragment of the interrupted answer reaches the screen afterwards,
+  // under either question's id.
+  const texts = (id) => face.frames.filter((f) => f.type === 'text' && f.ask === id).map((f) => f.delta).join('')
+  assert.equal(texts('i1'), 'Local ')
+  assert.equal(texts('i2'), 'Local answer, sir.')
   face.ws.close()
+})
+
+test('two clients at once keep their turns apart', async () => {
+  const bridge = bridges[0]
+  const [a, b] = await Promise.all([open(bridge), open(bridge)])
+  let release
+  gate = new Promise((resolve) => { release = resolve })
+  a.send({ type: 'ask', text: 'from the desk', id: 'a1' })
+  b.send({ type: 'ask', text: 'from the phone', id: 'b1' })
+  await a.until((f) => f.type === 'text' && f.ask === 'a1')
+  await b.until((f) => f.type === 'text' && f.ask === 'b1')
+  gate = null
+  release()
+  await a.until((f) => f.type === 'done' && f.ask === 'a1')
+  await b.until((f) => f.type === 'done' && f.ask === 'b1')
+  for (const [face, id] of [[a, 'a1'], [b, 'b1']]) {
+    const turn = face.frames.filter((f) => ['text', 'done', 'error', 'tool'].includes(f.type))
+    assert.ok(turn.every((f) => f.ask === id), JSON.stringify(turn))
+    assert.equal(turn.filter((f) => f.type === 'done').length, 1)
+    assert.equal(turn.filter((f) => f.type === 'text').map((f) => f.delta).join(''), 'Local answer, sir.')
+  }
+  a.ws.close()
+  b.ws.close()
 })
 
 test('in auto, a Claude that cannot start is replaced by the local model', async () => {
