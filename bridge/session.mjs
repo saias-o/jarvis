@@ -8,7 +8,7 @@ import { chromeServer, isChromeTool } from './chrome.mjs'
 import { visionServer } from './vision.mjs'
 import { memoryPrompt, memoryServer, MEMORY_TOOLS } from './memory.mjs'
 import { resetTime, unavailable } from './router.mjs'
-import { localSystemPrompt, localTools } from './local-tools.mjs'
+import { localSystemPrompt, localToolGroups, localTools } from './local-tools.mjs'
 import { deviceServer } from './device-server.mjs'
 import { agentContext } from '../shared/agent-context.mjs'
 import { appendExchange, retainedHistory } from '../shared/conversation.mjs'
@@ -363,7 +363,7 @@ export function createSession({
     const capabilityContext = agentContext({ tools: localToolset, host })
 
     /** Tools that are JARVIS keeping house, not work the user is waiting on. */
-    const QUIET_LOCAL_TOOLS = new Set(['remember', 'forget', 'show', 'display', ...UI_TOOLS])
+    const QUIET_LOCAL_TOOLS = new Set(['remember', 'forget', 'show', 'display', 'select_tools', ...UI_TOOLS])
 
     /**
      * One question, answered by the local model.
@@ -386,6 +386,8 @@ export function createSession({
           const info = await stat(path).catch(() => null)
           if (info && info.size <= 6 * 1024 * 1024) images.push((await readFile(path)).toString('base64'))
         }
+        // A turn starts with the core tools; the model loads the others itself.
+        const grouped = localToolGroups(localToolset)
         const text = await LOCAL.turn(turn.text, {
           trace: (event, data) => TRACE.child({ conversationId, turnId: turn.id, brain: 'local' }).record(event, data),
           system: localSystemPrompt({
@@ -394,7 +396,8 @@ export function createSession({
             inbox: INBOX.dir,
             allowWrites: ALLOW_WRITES,
             tools: localToolset, host,
-          }),
+          }) + (grouped.prompt ? `\n${grouped.prompt}` : ''),
+          offer: grouped.offer,
           history: transcript.filter((entry) => entry.id !== turn.exchangeId),
           observations: turn.messages?.slice(1) ?? [],
           onMessages: (value) => { messages = value },
@@ -405,7 +408,7 @@ export function createSession({
               sendTurn({ type: 'progress' })
             }
           },
-          tools: localToolset,
+          tools: [...localToolset, grouped.selector],
           images,
           signal: abort.signal,
           onText: (delta) => {

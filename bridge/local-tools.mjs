@@ -21,6 +21,10 @@ import { memoryFile, readFacts } from './memory.mjs'
 import { webExchange } from './net.mjs'
 import { pathProblem } from './policy.mjs'
 import { agentContext } from '../shared/agent-context.mjs'
+import { toolGroups } from '../shared/tool-groups.mjs'
+import { UI_TOOLS } from '../shared/ui-tools.mjs'
+import { DISPLAY_TOOLS } from '../shared/display-tools.mjs'
+import { CAMERA_TOOLS } from '../shared/camera-tools.mjs'
 import { moveFile } from './move-file.mjs'
 
 const MAX_READ_BYTES = 4 * 1024 * 1024
@@ -168,4 +172,33 @@ export function localSystemPrompt({ language, roots = [], inbox, allowWrites = f
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+/** What each group of the PC's catalogue is for; the first is where a turn starts. */
+const PC_GROUPS = {
+  pc: 'files, memory, web, shell and show',
+  display: 'panels, articles, galleries, videos and PDFs on screen',
+  interface: 'colours, reactor, orbits and effects of the interface',
+  camera: 'look and watch through the camera',
+  browser: 'the user\'s signed-in Chrome: open and read pages',
+  browser_act: 'the user\'s Chrome: find, click, type, diagnose',
+}
+const ACTING = /^chrome_(click|type|key|form_input|find|scroll|close_tab|console|network)$/
+
+/**
+ * The PC's catalogue in groups, for its local model: every schema at once is
+ * several thousand tokens a small model has to read on each step, on the CPU.
+ * Claude, which reads them fast, is given every tool through MCP.
+ */
+export function localToolGroups(tools) {
+  const kind = (tool) => UI_TOOLS.has(tool.name) ? 'interface' : DISPLAY_TOOLS.has(tool.name) ? 'display'
+    : CAMERA_TOOLS.has(tool.name) ? 'camera' : tool.name.startsWith('chrome_') ? (ACTING.test(tool.name) ? 'browser_act' : 'browser') : 'pc'
+  const groups = Object.fromEntries(Object.keys(PC_GROUPS).map((group) => [group, tools.filter((tool) => kind(tool) === group)]))
+  const grouped = toolGroups(PC_GROUPS, groups)
+  const others = grouped.others()
+  return {
+    ...grouped,
+    /** Told once per turn: what can be loaded besides the core tools. */
+    prompt: others.length ? `More tools, loaded with select_tools: ${others.join('; ')}.` : '',
+  }
 }

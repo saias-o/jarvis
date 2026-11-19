@@ -159,18 +159,20 @@ export function createLocal(config = localConfig(), { fetchImpl = fetch, now = D
    * @param {(delta:string)=>void} [opts.onText]
    * @param {(name:string)=>void} [opts.onTool]
    * @param {number} [opts.maxSteps]   Model calls allowed, the last one without tools.
+   * @param {(specs: object[]) => object[]} [opts.offer]  Narrows the schemas sent at each step (tool groups).
    * @returns {Promise<string>} Everything that was said.
    */
   async function turn(
     text,
-    { system, history = [], tools = [], images = [], signal, onText, onTool, onMessages, onCheckpoint, onProgress, trace, observations = [], maxSteps = 6 } = {},
+    { system, history = [], tools = [], images = [], signal, onText, onTool, onMessages, onCheckpoint, onProgress, trace, observations = [], maxSteps = 6, offer: narrow } = {},
   ) {
     const where = await locate()
     if (where.problem) throw new Error(where.problem)
 
     return agentTurn(text, {
       system, history, tools, images, signal, onText, onTool, onMessages, onCheckpoint, onProgress, trace, observations, maxSteps,
-      chat: async function* (messages, offer, abort) {
+      chat: async function* (messages, all, abort) {
+        const offer = narrow ? narrow(all) : all
         const fitted = fitContext(messages, offer, ctx * 3)
         await trace?.('model.input', { provider: 'ollama', model, endpoint: where.url, messages: fitted, tools: offer, contextTokens: ctx })
         yield* chat(where.url, {

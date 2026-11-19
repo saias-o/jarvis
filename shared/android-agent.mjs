@@ -7,7 +7,7 @@
  */
 import { deviceTools } from './tools.mjs'
 import { agentContext } from './agent-context.mjs'
-import { validatedTool } from './tool-validation.mjs'
+import { toolGroups } from './tool-groups.mjs'
 import { boundedChat } from './context-window.mjs'
 import { parseFacts } from './memory.mjs'
 import { UI_TOOLS } from './ui-tools.mjs'
@@ -81,40 +81,27 @@ const browserGroups = (tools) => ({
  */
 export function androidCatalogue(phone, pc) {
   let currentPc = pc
-  const groups = {
+  const grouped = toolGroups(GROUPS, {
     android: phone.tools.filter((tool) => !UI_TOOLS.has(tool.name) && !DISPLAY_TOOLS.has(tool.name)),
     display: phone.tools.filter((tool) => DISPLAY_TOOLS.has(tool.name)),
     interface: phone.tools.filter((tool) => UI_TOOLS.has(tool.name)),
     pc: pc.tools.filter((tool) => !inBrowser(tool)),
     ...browserGroups(pc.tools),
-  }
-  let selected = 'android'
-  const available = () => Object.keys(GROUPS).filter((group) => groups[group].length)
-  const switchable = () => available().length > 1
-  const names = (tools) => tools.map((tool) => tool.name).join(', ')
-  const selector = validatedTool({
-    name: 'select_tools',
-    description: 'Switch to this tool group for the next steps; show stays.',
-    parameters: { type: 'object', properties: { group: { type: 'string', enum: Object.keys(GROUPS) } }, required: ['group'] },
-    run({ group }) {
-      if (!groups[group].length) throw new Error(`The ${group} tools are not available now.`)
-      selected = group
-      return names(groups[group])
-    },
   })
+  const all = [...phone.tools, ...pc.tools]
   return {
-    tools: [...phone.tools, ...pc.tools, selector],
+    tools: [...all, grouped.selector],
     system: [phone.system, pc.system].filter(Boolean).join('\n'),
     updatePc(reachable) {
       currentPc = reachable
       const served = pc.tools.filter((tool) => reachable.tools.some((other) => other.name === tool.name))
-      groups.pc = served.filter((tool) => !inBrowser(tool))
-      Object.assign(groups, browserGroups(served))
-      if (!groups[selected].length) selected = 'android'
+      grouped.set('pc', served.filter((tool) => !inBrowser(tool)))
+      for (const [group, tools] of Object.entries(browserGroups(served))) grouped.set(group, tools)
     },
     // Only the selected group's rules and facts: the other groups are named so
     // that the model knows it can switch, without paying for their schemas.
     localSystem() {
+      const selected = grouped.selected()
       // The browser needs no folders: one line on whose Chrome it is.
       const hosts = {
         android: [phone.facts],
@@ -123,17 +110,13 @@ export function androidCatalogue(phone, pc) {
         browser_act: [BROWSER_FACT],
       }[selected] ?? []
       if (!pc.tools.length) hosts.push(pc.system)
-      else if (!groups.pc.length) hosts.push('Aucun outil PC disponible.')
-      const others = available().filter((group) => group !== selected).map((group) => `${group} = ${GROUPS[group]}`)
+      else if (!grouped.tools('pc').length) hosts.push('Aucun outil PC disponible.')
+      const others = grouped.others()
       if (others.length) hosts.push(`Autres groupes (select_tools) : ${others.join(' ; ')}.`)
-      const screen = selected === 'android' ? [] : phone.tools.filter((tool) => tool.name === 'show')
-      return phone.compose([...screen, ...groups[selected], ...(switchable() ? [selector] : [])], hosts, true)
+      return phone.compose(grouped.current(all), hosts, true)
     },
     offer(specs, local) {
-      if (!local) return specs.filter(({ function: fn }) => fn.name !== selector.name)
-      const offered = new Set(['show', ...groups[selected].map((tool) => tool.name)])
-      if (switchable()) offered.add(selector.name)
-      return specs.filter(({ function: fn }) => offered.has(fn.name))
+      return local ? grouped.offer(specs) : specs.filter(({ function: fn }) => fn.name !== grouped.selector.name)
     },
   }
 }

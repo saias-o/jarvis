@@ -361,3 +361,27 @@ test('the file tools stay inside their folders and refuse credentials', async ()
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('the PC\'s local model reads the core tools and loads a group only when it asks', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'jarvis-groups-'))
+  try {
+    const { localTools, localToolGroups } = await import('../bridge/local-tools.mjs')
+    const ops = []
+    const tools = localTools({ cwd: dir, roots: [dir], allowWrites: true, shell: true, show: () => {}, ui: (op) => ops.push(op) })
+    const grouped = localToolGroups(tools)
+    const local = fresh()
+    asked.length = 0
+    script.push([{ message: { content: '', tool_calls: [{ function: { name: 'select_tools', arguments: { group: 'interface' } } }] } }])
+    script.push([{ message: { content: '', tool_calls: [{ function: { name: 'ui_effect', arguments: { kind: 'pulse' } } }] } }])
+    script.push([{ message: { content: 'Done, sir.' } }])
+    const text = await local.turn('flash the screen', { system: `s\n${grouped.prompt}`, tools: [...tools, grouped.selector], offer: grouped.offer })
+    assert.equal(text, 'Done, sir.')
+    const sent = (i) => asked[i].tools.map((tool) => tool.function.name)
+    assert.ok(sent(0).includes('read_file') && sent(0).includes('select_tools') && !sent(0).includes('ui_effect') && !sent(0).includes('display'))
+    assert.ok(sent(1).includes('ui_effect') && sent(1).includes('show') && !sent(1).includes('read_file'))
+    assert.deepEqual(ops, ['effect'])
+    assert.match(asked[0].messages[0].content, /More tools, loaded with select_tools: display = /)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
