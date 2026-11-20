@@ -377,7 +377,7 @@ Everything is optional in bridge mode. Frontend settings live in `.env.local`
 | `JARVIS_LOCAL_MODEL` | `gemma4:e2b` | The Ollama model that stands in for Claude |
 | `JARVIS_LOCAL_URL` | `http://127.0.0.1:11434` | Where Ollama listens; several addresses, comma separated, are tried in order |
 | `JARVIS_LOCAL_CTX` | `8192` | Context window given to the local model, in tokens |
-| `JARVIS_LOCAL_KEEP_ALIVE` | `30m` | How long Ollama keeps the model loaded after an answer |
+| `JARVIS_LOCAL_KEEP_ALIVE` | `5m` | How long Ollama keeps the model loaded after an answer; lengthen it when the local model is the brain rather than the understudy |
 | `JARVIS_LOCAL_SHELL` | on | The device catalogue includes the PC shell when writes are on; `0` explicitly disables it |
 | `JARVIS_INBOX` | `<workspace>/inbox` | Where files handed to JARVIS are stored |
 | `JARVIS_UPLOAD_MAX_MB` | `1024` | Largest file accepted |

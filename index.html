@@ -20,7 +20,7 @@
     <meta name="apple-mobile-web-app-title" content="JARVIS" />
 
     <!--
-      Defence in depth behind the sanitiser in src/ui/Panels.tsx.
+      Defence in depth behind the sanitiser in src/ui/sanitise.ts.
 
       Panel markup is written by a model that has just been reading the open
       web, so the thing worth pinning down is `img-src`: a single
@@ -57,6 +57,11 @@
       proxied articles are framed from this same origin. On the computer the
       page comes from Vite and 'self' frames nothing the bridge serves.
 
+      `style-src` and `font-src` name no outside host at all any more. The two
+      faces are served from public/fonts, so Google appears nowhere in this
+      policy and nothing in this interface reaches a third party to render
+      itself. See src/styles/fonts.css.
+
       The rest is loose on purpose, because the voice stack needs it:
       'wasm-unsafe-eval' and 'unsafe-eval' for the ONNX runtime and the inline
       espeak-ng WASM, blob: workers for the wake-word engine and the speech
@@ -73,8 +78,8 @@
         frame-src 'self' https://www.youtube-nocookie.com https://www.youtube.com https://player.vimeo.com https://drive.google.com http://localhost:8787 http://127.0.0.1:8787 https://*.ts.net;
         img-src 'self' data: blob: http://localhost:8787 http://127.0.0.1:8787 https://*.ts.net;
         script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:;
-        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-        font-src 'self' data: https://fonts.gstatic.com;
+        style-src 'self' 'unsafe-inline';
+        font-src 'self' data:;
         connect-src 'self' data: blob: https: ws: wss: http://localhost:8787 http://127.0.0.1:8787 https://*.ts.net;
         worker-src 'self' blob:;
         media-src 'self' data: blob: http://localhost:8787 http://127.0.0.1:8787 https://*.ts.net;

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@300;400;600&family=JetBrains+Mono:wght@300;400&display=swap');
+@import './styles/fonts.css';
 
 /* The interface's styles, one file per surface, in cascade order: later
    files override earlier ones, so the order below is part of the design. */
@@ -7,7 +7,6 @@
 @import './styles/suggestions.css';
 @import './styles/ignition.css';
 @import './styles/boot.css';
-@import './styles/instruments.css';
 @import './styles/decoding.css';
 @import './styles/sweep.css';
 @import './styles/effects.css';

@@ -41,8 +41,22 @@ export function localConfig(env = process.env) {
      * still fits in the memory a small machine has to spare.
      */
     ctx: clamp(Number(env.JARVIS_LOCAL_CTX) || 8192, 2048, 131_072),
-    /** How long Ollama keeps the model loaded after an answer. */
-    keepAlive: env.JARVIS_LOCAL_KEEP_ALIVE?.trim() || '30m',
+    /**
+     * How long Ollama keeps the model loaded after an answer.
+     *
+     * Five minutes, not thirty. In the ordinary case this model is a
+     * stand-in: it answers when Claude cannot be reached, which on a good
+     * day is never, and half an hour of resident weights — two gigabytes of
+     * them, in video memory if the machine has any — is a long time to hold
+     * a machine's working room for a brain that spoke once.
+     *
+     * Five is still longer than any pause in a conversation, so an outage
+     * that lasts a while is answered by a model that is already warm; it is
+     * the silence afterwards that now gives the memory back. Raise it on a
+     * machine with room to spare, or when JARVIS_BRAIN=local makes this the
+     * brain rather than the understudy.
+     */
+    keepAlive: env.JARVIS_LOCAL_KEEP_ALIVE?.trim() || '5m',
     /**
      * Whether the model may reason before answering. Off by default: on a CPU a
      * reasoning Gemma spends 50 to 160 tokens thinking before a one-line answer
