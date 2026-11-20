@@ -269,6 +269,24 @@ test('in auto, a Claude that cannot start is replaced by the local model', async
   face.ws.close()
 })
 
+// Windows refuses to spawn a .cmd without a shell, synchronously: the same
+// throw a busy machine gives when it cannot start one more process. It used to
+// escape the connection handler and stop the whole bridge.
+test('a Claude that cannot even be spawned leaves the bridge up and the local model answering', { skip: process.platform !== 'win32' }, async () => {
+  const unspawnable = join(dir, 'claude.cmd')
+  writeFileSync(unspawnable, '@exit /b 1\r\n')
+  asked = []
+  const bridge = await startBridge('unspawnable', { JARVIS_BRAIN: 'auto', JARVIS_CLAUDE_EXECUTABLE: unspawnable })
+  const first = await open(bridge)
+  first.ws.close()
+  const face = await open(bridge)
+  face.send({ type: 'ask', text: 'are you there', id: 'u1' })
+  const done = await face.until((f) => f.type === 'done' && f.ask === 'u1', 30_000)
+  assert.equal(done.text, 'Local answer, sir.')
+  assert.equal(bridge.child.exitCode, null, 'the bridge is still running')
+  face.ws.close()
+})
+
 test('in claude-only mode the same failure is reported, as it always was', async () => {
   const bridge = await startBridge('strict', {
     JARVIS_BRAIN: 'claude',

@@ -500,9 +500,19 @@ export function createSession({
       if (current !== turn || turn.cancelled || socketClosed) return
       if (why) return runLocal(turn, why)
 
+      claude ??= tryStartClaude()
+      if (!claude) {
+        // The CLI could not even be spawned. The local model answers when there
+        // is one; otherwise this is the same failure claude-only mode reports.
+        if (BRAIN_MODE === 'auto' && (await LOCAL.available())) {
+          if (current !== turn || turn.cancelled || socketClosed) return
+          return runLocal(turn, 'crashed')
+        }
+        turn.done = true
+        return sendTurn({ type: 'error', message: 'Claude could not be started.' })
+      }
       turn.brain = 'claude'
       showBrain('claude')
-      claude ??= startClaude()
       const unseen = transcript.slice(Math.max(0, claudeSeen - (completedCount - transcript.length)))
       claudeSeen = completedCount
       claude.push(unseen.length ? recap(unseen) + turn.text : turn.text)
@@ -703,6 +713,21 @@ export function createSession({
      * new session that failed the same way. With a local model to hand, the
      * conversation carries on there instead, and Claude is tried again later.
      */
+    /**
+     * Starting the CLI can throw outright — Windows refusing a spawn when many
+     * pages connect at once. That is Claude being unavailable for this
+     * connection, not a reason for the whole bridge to stop.
+     */
+    const tryStartClaude = () => {
+      try {
+        return startClaude()
+      } catch (err) {
+        console.error('[jarvis] Claude could not start:', err?.message ?? err)
+        if (BRAIN_MODE === 'auto') CLAUDE_HEALTH.markDown('crashed')
+        return null
+      }
+    }
+
     const sessionEnded = async (handle, err) => {
       const ours = handle.closed
       handle.close()
@@ -1042,6 +1067,6 @@ export function createSession({
     // when it comes. Not while Claude is known to be out of reach: the session
     // would only fail, and the first question is going to the local model.
     if (BRAIN_MODE === 'local') showBrain('local', 'chosen')
-    else if (!CLAUDE_HEALTH.down()) claude = startClaude()
+    else if (!CLAUDE_HEALTH.down()) claude = tryStartClaude()
   }
 }
