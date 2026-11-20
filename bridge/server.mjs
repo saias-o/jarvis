@@ -25,7 +25,7 @@ import { createRemote, REMOTE_FILE } from './remote.mjs'
 import { brainMode, createHealth, createProbe } from './router.mjs'
 import { createLocal, localConfig } from './local.mjs'
 import { fileTrace } from './trace.mjs'
-import { createTrace } from '../shared/trace.mjs'
+import { noTrace } from '../shared/trace.mjs'
 import { createInbox } from './inbox.mjs'
 import { homedir } from 'node:os'
 import { mkdirSync, readFileSync } from 'node:fs'
@@ -345,7 +345,7 @@ const WORKSPACE = resolvePath(
 )
 mkdirSync(WORKSPACE, { recursive: true })
 const TRACE_DIR = resolvePath(process.env.JARVIS_TRACE_DIR || join(WORKSPACE, '..', 'logs'))
-const TRACE = process.env.JARVIS_TRACE === '0' ? createTrace({ write: () => {} }) : fileTrace(TRACE_DIR)
+const TRACE = process.env.JARVIS_TRACE === '0' ? noTrace : fileTrace(TRACE_DIR)
 void TRACE.record('service.start', { pid: process.pid, model: MODEL, mode: BRAIN_MODE, workspace: WORKSPACE })
 console.log(`[jarvis] structured traces ${process.env.JARVIS_TRACE === '0' ? 'disabled' : `in ${TRACE_DIR}`}`)
 

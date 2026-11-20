@@ -1,4 +1,4 @@
-import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
+import type { HandLandmarker } from '@mediapipe/tasks-vision'
 import { OneEuroPoint } from './oneEuro'
 import { holdCamera, releaseCamera } from './camera'
 
@@ -567,6 +567,15 @@ function classify(
 async function ensureModel() {
   if (landmarker) return landmarker
   diag.loading = true
+  // MediaPipe comes with the gesture mode (G), not with the page.
+  let mediapipe: typeof import('@mediapipe/tasks-vision')
+  try {
+    mediapipe = await import('@mediapipe/tasks-vision')
+  } catch (err) {
+    diag.loading = false
+    throw err
+  }
+  const { FilesetResolver, HandLandmarker } = mediapipe
   try {
     const vision = await FilesetResolver.forVisionTasks(WASM_BASE)
     landmarker = await HandLandmarker.createFromOptions(vision, {

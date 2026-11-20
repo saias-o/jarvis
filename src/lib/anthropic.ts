@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk'
+import type Anthropic from '@anthropic-ai/sdk'
 import { env, MODEL, FAST_MODE, SYSTEM_PROMPT, activeServers } from '../config'
 import { diagnostics } from './trace'
 
@@ -7,11 +7,18 @@ import { diagnostics } from './trace'
  * server of our own. `dangerouslyAllowBrowser` is the SDK's acknowledgement
  * that this exposes the key to anyone who opens devtools, which is acceptable
  * for a local demo and not for a public deploy.
+ *
+ * Loaded when the direct path is used, not with the page: the bridge and the
+ * phone never call it, and the SDK is a large part of the bundle.
  */
-const client = new Anthropic({
-  apiKey: env.anthropicKey,
-  dangerouslyAllowBrowser: true,
-})
+let client: Promise<Anthropic> | null = null
+export function load(): Promise<Anthropic> {
+  client ??= import('@anthropic-ai/sdk').then(
+    ({ default: Sdk }) => new Sdk({ apiKey: env.anthropicKey, dangerouslyAllowBrowser: true }),
+  )
+  client.catch(() => { client = null })
+  return client
+}
 
 export type Msg = Anthropic.Beta.BetaMessageParam
 
@@ -25,7 +32,7 @@ export type AskHandlers = {
 /** The stream for the turn in flight, so a barge-in can abort it. Without this
  *  cutting JARVIS off only silenced the speaker: the model kept generating,
  *  and kept billing, into a browser nobody was listening to. */
-let active: ReturnType<typeof client.beta.messages.stream> | null = null
+let active: { abort(): void } | null = null
 let cancelled = false
 
 /**
@@ -98,7 +105,10 @@ export async function ask(
       if (cancelled) return { text: text.trim(), tools: usedTools }
 
       await logger.record('model.input', { ...params, messages })
-      const stream = client.beta.messages.stream({ ...params, messages })
+      const sdk = await load()
+      // The first turn may wait on the SDK; a barge-in meanwhile has no stream to abort.
+      if (cancelled) return { text: text.trim(), tools: usedTools }
+      const stream = sdk.beta.messages.stream({ ...params, messages })
       active = stream
 
       stream.on('text', (delta) => {

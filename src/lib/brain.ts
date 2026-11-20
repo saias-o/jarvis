@@ -65,6 +65,8 @@ export async function warm(): Promise<void> {
     return
   }
   if (usingBridge) await bridge.warmBridge()
+  // The direct path's SDK comes with its mode, fetched while the interface boots.
+  else void direct.load().catch(() => { /* reported by the first turn */ })
 }
 
 /** The bridge reports its server list twice — from config on connect, then

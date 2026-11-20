@@ -50,3 +50,10 @@ export function createTrace({ write, context = {}, now = () => new Date(), onErr
   })
   return scope({ sessionId: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`, ...traceData(context) })
 }
+
+/** Traces switched off: nothing is serialized and nothing is written. */
+export const noTrace = Object.freeze({
+  record: () => Promise.resolve(),
+  child: () => noTrace,
+  flush: () => Promise.resolve(),
+})
