@@ -1,7 +1,6 @@
 import { AndroidSettings } from './ui/AndroidSettings'
 import { isAndroid } from './lib/android'
-import { useEffect, useRef, useState } from 'react'
-import { Scene } from './scene/Scene'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Hud } from './ui/Hud'
 import { Boot } from './ui/Boot'
 import { Ignition } from './ui/Ignition'
@@ -32,6 +31,23 @@ import { createListening, onFirstGesture } from './lib/listening'
 import { connectBridgeEvents } from './lib/bridgeEvents'
 import { bindShortcuts } from './lib/shortcuts'
 import { receiveShares } from './lib/androidShares'
+
+/**
+ * The reactor, fetched rather than carried.
+ *
+ * Three, the fibre renderer and the post-processing chain are the largest
+ * thing in the bundle by some way, and nothing can be said or heard until they
+ * have been parsed — on a phone, on the first load, that is the slowest
+ * machine doing the heaviest parse before the interface will answer at all.
+ * Behind a lazy boundary they arrive in their own chunk, in parallel with the
+ * rest of the app starting up.
+ *
+ * The fallback is nothing, deliberately: the page's own background is already
+ * painted, the reactor spends its first second as a sealed ring that has not
+ * been powered on, and an orb arriving a few hundred milliseconds into the
+ * boot sequence is indistinguishable from one that was always there.
+ */
+const Scene = lazy(() => import('./scene/Scene').then(({ Scene: component }) => ({ default: component })))
 
 /**
  * The app: one lifetime of the interface.
@@ -304,7 +320,9 @@ export default function App() {
   return (
     <>
       <AndroidSettings />
-      <Scene />
+      <Suspense fallback={null}>
+        <Scene />
+      </Suspense>
       <Hud />
       {BOOT_SEQUENCE && <Boot />}
       <Diagnostics />
