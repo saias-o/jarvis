@@ -41,9 +41,24 @@ const fragment = /* glsl */ `
   varying vec2 vUv;
 
   // -- value noise + fbm ----------------------------------------------------
+  /**
+   * Gradient hash, without a transcendental.
+   *
+   * The textbook form of this is fract(sin(dot(p, k)) * 43758.5), which costs
+   * two sines per call. This shader called it eighty times per pixel — four
+   * fbm of five octaves of four corners — so the orb alone was asking for a
+   * hundred and sixty sines on every pixel of a near-full-frame quad, sixty
+   * times a second, in every phase including the ones where nothing moves.
+   *
+   * Three multiply-fract rounds give a field of the same quality for a
+   * fraction of the cost. The pattern it produces is a different pattern —
+   * statistically the same dust and the same wandering edge, not the same
+   * grains in the same places.
+   */
   vec2 hash(vec2 p) {
-    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-    return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+    vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    q += dot(q, q.yzx + 33.33);
+    return -1.0 + 2.0 * fract(vec2((q.x + q.y) * q.z, (q.x + q.z) * q.y));
   }
 
   float noise(vec2 p) {
@@ -58,20 +73,37 @@ const fragment = /* glsl */ `
       u.y);
   }
 
-  float fbm(vec2 p) {
-    float v = 0.0;
-    float a = 0.5;
-    for (int i = 0; i < 5; i++) {
-      v += a * noise(p);
-      p *= 2.02;
-      a *= 0.5;
-    }
-    return v;
+  /**
+   * Two and three octaves, unrolled, in place of five.
+   *
+   * The fourth and fifth octaves carried six and three percent of the
+   * amplitude, on detail finer than the bloom that is about to blur it: they
+   * were a fifth of the noise budget spent below the threshold of the image.
+   *
+   * Each is scaled back up to the amplitude the five-octave sum had
+   * (0.96875), so every term that reads these keeps the range it was authored
+   * against — the ring wanders as far as it did and the erosion threshold
+   * still cuts in the same place.
+   */
+  float fbm2(vec2 p) {
+    return (0.5 * noise(p) + 0.25 * noise(p * 2.02)) * 1.29167;
   }
 
-  // A soft complete circle at radius r0, w wide.
+  float fbm3(vec2 p) {
+    return (0.5 * noise(p) + 0.25 * noise(p * 2.02) + 0.125 * noise(p * 4.0804)) * 1.10714;
+  }
+
+  /**
+   * A soft complete circle at radius r0, w wide.
+   *
+   * Squared by multiplication rather than by pow. Eight bands are evaluated
+   * per pixel and pow is a log2 and an exp2 each time, for an exponent of two;
+   * it is also undefined for a negative base, which (r - r0) is for every
+   * pixel inside the band's own radius.
+   */
   float band(float r, float r0, float w) {
-    return exp(-pow((r - r0) / w, 2.0));
+    float x = (r - r0) / w;
+    return exp(-x * x);
   }
 
   #define TAU 6.28318530718
@@ -83,23 +115,6 @@ const fragment = /* glsl */ `
     // pattern is untouched.
     vec2 p = (vUv * 2.0 - 1.0) * uZoom;
     float r = length(p);
-    float a = atan(p.y, p.x);
-
-    // Sampling the turbulence on the unit circle rather than on p keeps it
-    // continuous across the -pi/pi seam, which a plain atan lookup is not.
-    vec2 ring = vec2(cos(a), sin(a));
-
-    // -- the main ring ------------------------------------------------------
-    // Its radius wanders on two scales, so the outline is never a clean
-    // geometric circle — this dusty, breathing edge is the whole character of
-    // the thing. The slow term drifts; the fine term shivers.
-    float wob   = fbm(ring * 2.6 + vec2(uPhase * 0.22, 0.0)) * 0.055;
-    float grain = fbm(ring * 9.0 - vec2(uPhase * 0.4, 0.0)) * 0.020;
-    float R = 0.74 + wob + grain + uLevel * 0.03;
-
-    // Erosion: the outer boundary is eaten away in patches, so the ring reads
-    // as something luminous and unstable rather than as a drawn stroke.
-    float erode = smoothstep(-0.25, 0.35, fbm(ring * 5.0 + vec2(uPhase * 0.5, 3.0)));
 
     // -- style ---------------------------------------------------------------
     // Weights on the terms that already exist rather than three shaders or
@@ -111,6 +126,9 @@ const fragment = /* glsl */ `
     // opposite: it keeps only the things that are genuinely lines — the
     // concentric hairlines and the polar weave — and drops the washes and the
     // glow that were filling the space between them.
+    //
+    // Read before anything else because the early exit below needs kGlow, and
+    // because six mixes of a uniform are the cheapest lines in the shader.
     float wSphere = clamp(1.0 - abs(uStyle - 1.0), 0.0, 1.0);
     float wWire   = clamp(1.0 - abs(uStyle - 2.0), 0.0, 1.0);
 
@@ -120,6 +138,45 @@ const fragment = /* glsl */ `
     float kMesh    = mix(1.0, 0.60, wSphere) * mix(1.0, 2.60, wWire);
     float kWash    = mix(1.0, 1.60, wSphere) * mix(1.0, 0.00, wWire);
     float kGlow    = mix(1.0, 2.20, wSphere) * mix(1.0, 0.30, wWire);
+
+    // -- outside the ring ----------------------------------------------------
+    // The quad carries a wide dark margin, and out there only one term is
+    // still awake: the inner glow, which is an exponential in r alone. Every
+    // band is a gaussian whose centre is at most 0.82 — at r = 1.05 the
+    // nearest of them, the dust at R + 0.028 with a width of 0.055, is down to
+    // eight parts in ten million, and the core terms are identically zero
+    // because smoothstep(0.40, 0.36, r) closed at 0.40.
+    //
+    // So the whole margin — rather more than a third of the frame on a
+    // widescreen window — is bought for one compare and one exp, instead of
+    // three turbulence lookups, an atan and a sin/cos pair.
+    if (r > 1.05) {
+      float faint = exp(-r * 3.4) * (0.16 + uLevel * 0.34) * kGlow;
+      faint *= smoothstep(0.0, 0.35, uOpen - r * 0.45);
+      faint *= uIntensity;
+      gl_FragColor = vec4(uColor * faint, faint);
+      return;
+    }
+
+    float a = atan(p.y, p.x);
+
+    // Sampling the turbulence on the unit circle rather than on p keeps it
+    // continuous across the -pi/pi seam, which a plain atan lookup is not.
+    vec2 ring = vec2(cos(a), sin(a));
+
+    // -- the main ring ------------------------------------------------------
+    // Its radius wanders on two scales, so the outline is never a clean
+    // geometric circle — this dusty, breathing edge is the whole character of
+    // the thing. The slow term drifts; the fine term shivers — and since that
+    // shiver is a fiftieth of the radius at its widest, it is the one term
+    // that can afford to lose a second octave as well.
+    float wob   = fbm3(ring * 2.6 + vec2(uPhase * 0.22, 0.0)) * 0.055;
+    float grain = fbm2(ring * 9.0 - vec2(uPhase * 0.4, 0.0)) * 0.020;
+    float R = 0.74 + wob + grain + uLevel * 0.03;
+
+    // Erosion: the outer boundary is eaten away in patches, so the ring reads
+    // as something luminous and unstable rather than as a drawn stroke.
+    float erode = smoothstep(-0.25, 0.35, fbm3(ring * 5.0 + vec2(uPhase * 0.5, 3.0)));
 
     float outer = band(r, R, 0.030) * (0.45 + erode * 0.6);
     // A second, tighter pass just inside gives the ring an inner wall, which is
@@ -131,7 +188,7 @@ const fragment = /* glsl */ `
     // Dust: a scatter of bright motes clinging to the outer edge, densest right
     // at the rim and thinning outward, so the ring dissolves into grains rather
     // than ending at a line. This is the single most reference-accurate detail.
-    float speck = fbm(ring * 46.0 + vec2(uPhase * 0.15, 11.0));
+    float speck = fbm3(ring * 46.0 + vec2(uPhase * 0.15, 11.0));
     speck = pow(max(speck, 0.0), 3.0);
     float dust = speck * band(r, R + 0.028, 0.055) * (1.4 + uLevel);
 

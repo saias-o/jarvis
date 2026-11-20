@@ -169,6 +169,80 @@ function DecodeText({ text }: { text: string }) {
   )
 }
 
+/**
+ * The SIGNAL meter: loudness, sixty times a second.
+ *
+ * It writes to its own two nodes instead of rendering. The level is pushed
+ * into the store once per animation frame by the app's pump, and the HUD used
+ * to read it with a selector — so every frame re-rendered this whole file,
+ * header, both rails, transcript and badges included, in order to move one bar
+ * by a pixel and print three digits. The scene is already careful about
+ * precisely this (see the note on Drive in scene/Scene.tsx); the DOM side was
+ * not, and it is the DOM side that has a layout to redo.
+ *
+ * Subscribing imperatively keeps the store the single source of the number —
+ * the reactor reads the same field — while React stays out of the frame loop
+ * entirely. The bar is a compositor transform, so it can take every frame. The
+ * readout is text, so it costs a layout, and it is held to ten a second: at
+ * sixty the digits are a blur nobody can read anyway.
+ */
+const READOUT_MS = 100
+
+function Signal() {
+  const fill = useRef<HTMLDivElement>(null)
+  const readout = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let shown = -1
+    let pending: number | null = null
+    let timer = 0
+
+    // Trailing edge, not leading. Dropping an update inside the window loses
+    // the last one of a burst, and the last one of a burst is the value the
+    // meter comes to rest at: when the room goes quiet the bar falls to the
+    // floor while the digits keep whatever they were showing when it did.
+    const paint = () => {
+      timer = 0
+      if (pending === null || pending === shown) return
+      shown = pending
+      pending = null
+      if (readout.current) {
+        readout.current.textContent = `${String(shown).padStart(3, '0')}%`
+      }
+    }
+
+    const apply = (level: number) => {
+      fill.current?.style.setProperty('transform', `scaleY(${level})`)
+      const whole = Math.round(level * 100)
+      if (whole === shown) {
+        pending = null
+        return
+      }
+      pending = whole
+      if (!timer) timer = window.setTimeout(paint, READOUT_MS)
+    }
+
+    apply(useStore.getState().level)
+    const stop = useStore.subscribe((state, previous) => {
+      if (state.level !== previous.level) apply(state.level)
+    })
+    return () => {
+      stop()
+      if (timer) clearTimeout(timer)
+    }
+  }, [])
+
+  return (
+    <aside className="rail rail-right">
+      <div className="rail-title">SIGNAL</div>
+      <div className="meter">
+        <div className="meter-fill" ref={fill} style={{ transform: 'scaleY(0)' }} />
+      </div>
+      <div className="rail-item mono" ref={readout}>000%</div>
+    </aside>
+  )
+}
+
 /* --------------------------------------------------------------------- hud */
 
 export function Hud() {
@@ -179,7 +253,6 @@ export function Hud() {
   const connected = useStore((s) => s.connected)
   const error = useStore((s) => s.error)
   const brain = useStore((s) => s.brain)
-  const level = useStore((s) => s.level)
   const voice = useStore((s) => s.voice)
   const bootNote = useStore((s) => s.bootNote)
   const voiceReady = useStore((s) => s.voiceReady)
@@ -260,14 +333,10 @@ export function Hud() {
         </aside>
       )}
 
-      {/* Right rail: live telemetry, mostly for flavour */}
-      <aside className="rail rail-right">
-        <div className="rail-title">SIGNAL</div>
-        <div className="meter">
-          <div className="meter-fill" style={{ transform: `scaleY(${level})` }} />
-        </div>
-        <div className="rail-item mono">{(level * 100).toFixed(0).padStart(3, '0')}%</div>
-      </aside>
+      {/* Right rail: live telemetry, mostly for flavour. Its own component so
+          the microphone does not re-render the rest of this file sixty times a
+          second — see the note above Signal. */}
+      <Signal />
 
       <AnimatePresence>
         {activeTool && ui.chrome.toolBadge && (
