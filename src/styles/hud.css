@@ -234,13 +234,40 @@
   letter-spacing: 0.26em;
   text-transform: uppercase;
   opacity: 0.45;
-  padding-top: 3px;
+  /* Enough to sit on the first line of text now that his half has a plate
+     under it and its first baseline has moved down by the plate's padding. */
+  padding-top: 8px;
 }
 
 .log-user .log-text { opacity: 0.52; }
+
+/*
+ * His words get a plate; the user's do not.
+ *
+ * The log lies over four thousand drifting points and a reactor that blooms
+ * white at the rim, and white 14px type on that is legible only where the
+ * dust happens to be thin. A glow behind the letters was the previous answer
+ * and it loses to a bright background, because it is light added to light.
+ *
+ * So: something dark that takes the field down rather than adding to it, and
+ * a little blur so the points behind stop resolving as points and become a
+ * wash. Only a little — the scene is the thing the interface is looking at,
+ * and the plate is meant to be read through, not to become a panel.
+ *
+ * It is on the text rather than on the row so it ends where the sentence
+ * ends, like a subtitle, instead of ruling a bar across the frame. A flex
+ * item is a block box, so one plate covers a wrapped paragraph whole.
+ *
+ * The user's half stays bare on purpose: it is set at half opacity because it
+ * is the quieter of the two, and a box around it would undo that.
+ */
 .log-jarvis .log-text {
   color: #eaf9ff;
   text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 45%, transparent);
+  padding: 5px 12px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(6px);
 }
 
 /* Live partial transcript while listening */
