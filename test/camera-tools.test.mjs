@@ -9,7 +9,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { agentTurn } from '../shared/agent-loop.mjs'
-import { androidTools } from '../shared/android-agent.mjs'
+import { androidCatalogue, androidChat, androidTools } from '../shared/android-agent.mjs'
+import { LOCAL_CONTEXT_BYTES } from '../shared/context-window.mjs'
 import { CAMERA_TOOLS } from '../shared/camera-tools.mjs'
 import { localTools } from '../bridge/local-tools.mjs'
 import { sdkDeviceTools } from '../bridge/device-server.mjs'
@@ -61,4 +62,39 @@ test('Claude receives the frame as image content, and a refusal as a sentence it
 test('a device whose models cannot see images is not offered the camera', async () => {
   const phone = await androidTools({ status: async () => ({ root: '/s', inbox: '/i', granted: true }), readMemory: async () => ({ text: '' }) }, { show: () => {} })
   assert.ok(!phone.tools.some((tool) => CAMERA_TOOLS.has(tool.name)))
+})
+
+test('the phone offers the camera to PC inference, never to Gemma, and withdraws it on fallback', async () => {
+  const phone = await androidTools({
+    status: async () => ({ root: '/s', inbox: '/i', granted: true }),
+    readMemory: async () => ({ text: '' }),
+  }, { show: () => {}, capture: async () => ({ data: FRAME, mimeType: 'image/jpeg' }), context: LOCAL_CONTEXT_BYTES })
+  assert.deepEqual(phone.tools.filter((tool) => CAMERA_TOOLS.has(tool.name)).map((tool) => tool.name), ['look', 'watch'])
+  // The live view comes with the hardware: same WebView, same camera.
+  assert.match(phone.tools.find((tool) => tool.name === 'blade').parameters.properties.kind.enum.join(), /camera/)
+
+  const catalogue = androidCatalogue(phone, { tools: [], system: 'Aucun PC.' })
+  const specs = catalogue.tools.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } }))
+  const offered = (local) => catalogue.offer(specs, local).map(({ function: fn }) => fn.name)
+  assert.ok(offered(false).includes('look') && offered(false).includes('watch'))
+  // No group holds the camera, so the phone's own model is never offered it.
+  assert.ok(!offered(true).some((name) => CAMERA_TOOLS.has(name)))
+  assert.ok(!catalogue.localSystem().includes('look'))
+
+  // A frame obtained while the PC was thinking must not reach Gemma silently.
+  let gemmaSaw
+  const model = androidChat({
+    inference: 'pc', catalogue,
+    // Fails before producing anything, as an unreachable PC does.
+    remote: () => { throw new Error('PC inference unavailable') },
+    async *local(messages) { gemmaSaw = messages; yield { message: { content: 'Je ne vois pas l’image.' } } },
+    discover: async () => ({ tools: [], system: '' }),
+  })
+  const seen = [{ role: 'system', content: 'x' }, { role: 'user', content: 'Que tiens-je ?' },
+    { role: 'tool', tool_name: 'look', content: 'One frame from the camera:', images: [FRAME] }]
+  for await (const _chunk of model.chat(seen, specs)) { /* drained */ }
+  assert.equal(model.source(), 'device')
+  const result = gemmaSaw.at(-1)
+  assert.equal(result.images, undefined)
+  assert.match(result.content, /image non lisible par le modèle du téléphone/)
 })

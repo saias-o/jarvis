@@ -13,11 +13,23 @@ import type { AskHandlers } from './anthropic'
 import { useStore, type Blade } from '../store'
 import { diagnostics } from './trace'
 import { applyUiOp } from './uiOps'
+import { capture, type CameraRequest } from './capture'
 import type { Trace } from '../../shared/trace.mjs'
 
 let active: AbortController | null = null
 let settled: Promise<unknown> = Promise.resolve()
 const history: Array<{ user: string; jarvis: string; messages: ChatMessage[] }> = []
+
+/**
+ * Width ceiling for a camera frame leaving the phone.
+ *
+ * The frame travels to the PC inside the /inference body, which also carries
+ * the conversation and every schema inside 256 kB. A full-size still is 150 to
+ * 250 kB of base64 on its own, so the phone asks the camera for a smaller one
+ * rather than sending something the budget then has to throw away. The PC's own
+ * socket has no such limit and keeps full-size frames.
+ */
+const PHONE_FRAME_WIDTH = 1024
 
 async function* nativeChat(messages: ChatMessage[], tools: unknown[], signal?: AbortSignal, trace?: Trace): AsyncGenerator<ChatChunk> {
   signal?.throwIfAborted()
@@ -117,6 +129,14 @@ export async function ask(prompt: string, handlers: AskHandlers, files: string[]
     const phone = await androidTools(JarvisFiles, {
       // The same interface as on the PC, redressed by the same ui_* tools.
       ui: applyUiOp,
+      // The camera, from the WebView that owns it — but only to a model that
+      // can see what comes back. On-device Gemma reads text only, so with it
+      // selected the phone hands over no capture and look/watch are not
+      // offered; the catalogue leaves them out of every local tool group too,
+      // so a fallback to Gemma mid-turn withdraws them as well.
+      capture: pcUrl && inference === 'pc'
+        ? ((request: CameraRequest) => capture(request, PHONE_FRAME_WIDTH))
+        : undefined,
       show: async (blade) => {
         if (!hostOnline) blade = await withoutPc(blade)
         useStore.getState().pushBlade({ ...blade, trace: context } as Blade)

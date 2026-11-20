@@ -180,11 +180,20 @@ const toJpeg = (canvas: HTMLCanvasElement, q = 0.82) => {
   return { data: url.slice(url.indexOf(',') + 1), mimeType: 'image/jpeg' }
 }
 
-/** One frame, full size. */
-export function grabFrame(): { data: string; mimeType: string } {
+/**
+ * One frame, full size unless a width ceiling is given.
+ *
+ * The ceiling exists for the phone. A 1280-wide still is 150 to 250 kB of
+ * base64, and the phone hands its frames to the PC inside a 256 kB HTTP body
+ * that also carries the conversation and every schema; the PC's own socket has
+ * no such limit. Scaling at draw time costs nothing, where re-encoding a
+ * finished JPEG would cost a decode.
+ */
+export function grabFrame(maxWidth = 0): { data: string; mimeType: string } {
   if (!video?.videoWidth) throw new Error('the camera is not ready')
+  const scale = maxWidth > 0 ? Math.min(1, maxWidth / video.videoWidth) : 1
   const canvas = document.createElement('canvas')
-  if (!drawTo(canvas, video.videoWidth, video.videoHeight)) {
+  if (!drawTo(canvas, Math.round(video.videoWidth * scale), Math.round(video.videoHeight * scale))) {
     throw new Error('could not read the camera frame')
   }
   return toJpeg(canvas)
@@ -237,13 +246,18 @@ export function stopBuffer(): void {
 function contactSheet(
   shots: { at: number; bitmap: HTMLCanvasElement }[],
   originAt: number,
+  /** Width ceiling for the whole sheet, in pixels; 0 keeps full-size cells. */
+  maxWidth = 0,
 ): { data: string; mimeType: string } {
   const n = shots.length
   const cols = n <= 2 ? n : n <= 6 ? 3 : 4
   const rows = Math.ceil(n / cols)
+  // Cells shrink together, so reading order and the 16:9 frame are unchanged.
+  const cellW = maxWidth > 0 ? Math.min(CELL_W, Math.max(160, Math.floor(maxWidth / cols))) : CELL_W
+  const cellH = Math.round((cellW * CELL_H) / CELL_W)
   const canvas = document.createElement('canvas')
-  canvas.width = cols * CELL_W
-  canvas.height = rows * CELL_H
+  canvas.width = cols * cellW
+  canvas.height = rows * cellH
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('could not build the grid')
 
@@ -251,23 +265,26 @@ function contactSheet(
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 
   shots.forEach((shot, i) => {
-    const x = (i % cols) * CELL_W
-    const y = Math.floor(i / cols) * CELL_H
-    ctx.drawImage(shot.bitmap, x, y, CELL_W, CELL_H)
+    const x = (i % cols) * cellW
+    const y = Math.floor(i / cols) * cellH
+    ctx.drawImage(shot.bitmap, x, y, cellW, cellH)
 
     const label = `${i + 1}  ${((shot.at - originAt) / 1000).toFixed(1)}s`
-    ctx.font = '600 22px ui-monospace, monospace'
+    // The stamp scales with the cell: unreadable stamps lose the ordering.
+    const stamp = Math.max(12, Math.round((22 * cellW) / CELL_W))
+    ctx.font = `600 ${stamp}px ui-monospace, monospace`
+    const pad = Math.max(6, Math.round((12 * cellW) / CELL_W))
     // Drawn twice — dark underneath, light on top — so the stamp survives both
     // a bright frame and a dark one without a panel behind it.
     ctx.lineWidth = 4
     ctx.strokeStyle = 'rgba(0,0,0,0.85)'
-    ctx.strokeText(label, x + 12, y + 30)
+    ctx.strokeText(label, x + pad, y + pad + stamp)
     ctx.fillStyle = '#fff'
-    ctx.fillText(label, x + 12, y + 30)
+    ctx.fillText(label, x + pad, y + pad + stamp)
 
     ctx.strokeStyle = 'rgba(255,255,255,0.25)'
     ctx.lineWidth = 1
-    ctx.strokeRect(x + 0.5, y + 0.5, CELL_W - 1, CELL_H - 1)
+    ctx.strokeRect(x + 0.5, y + 0.5, cellW - 1, cellH - 1)
   })
 
   return toJpeg(canvas, 0.78)
@@ -292,6 +309,7 @@ function sample<T>(items: T[], want: number): T[] {
 export async function watchAhead(
   seconds: number,
   frames: number,
+  maxWidth = 0,
 ): Promise<{ data: string; mimeType: string }> {
   if (!video?.videoWidth) throw new Error('the camera is not ready')
   const shots: Shot[] = []
@@ -306,7 +324,7 @@ export async function watchAhead(
     if (i < frames - 1) await new Promise((r) => setTimeout(r, gap))
   }
   if (!shots.length) throw new Error('no frames were captured')
-  return contactSheet(shots, started)
+  return contactSheet(shots, started, maxWidth)
 }
 
 /**
@@ -319,12 +337,13 @@ export async function watchAhead(
 export function recentGrid(
   seconds: number,
   frames: number,
+  maxWidth = 0,
 ): { data: string; mimeType: string } | null {
   const cutoff = performance.now() - seconds * 1000
   const window = buffer.filter((s) => s.at >= cutoff)
   if (window.length < 2) return null
   const picked = sample(window, frames)
-  return contactSheet(picked, picked[0].at)
+  return contactSheet(picked, picked[0].at, maxWidth)
 }
 
 export const bufferedSeconds = () =>

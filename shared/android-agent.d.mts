@@ -37,8 +37,13 @@ export function androidTools(files: {
 }, platform?: {
   /** Puts a blade on the interface; an image blade's url is a PC path or a web address. */
   show?: (blade: ShownBlade) => unknown
-  /** Whether a blade may open the live camera view on this device. */
-  camera?: boolean
+  /**
+   * A frame from this device's camera (shared/camera-tools.mjs). Supplied only
+   * when the model of this turn can see images; without it `look`, `watch` and
+   * the live camera blade are not in the catalogue at all.
+   */
+  capture?: (request: { mode: 'look' | 'watch'; reason?: string; seconds?: number; when?: 'now' | 'past' })
+    => Promise<{ data?: string; mimeType?: string; error?: string }>
   /** Hands one ui_* operation to the interface (shared/ui-tools.mjs). */
   ui?: (op: string, args: unknown) => unknown
   http?: WebHttp

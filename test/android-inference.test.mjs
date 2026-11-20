@@ -137,3 +137,65 @@ test('a native SDK tool absent from the client manifest is never forwarded', asy
   const result = await infer({ messages: [{ role: 'user', content: 'test' }], tools: [] })
   assert.deepEqual(result.message.tool_calls, [])
 })
+
+test('a camera frame reaches the PC as image content, marked in the conversation', async () => {
+  const frame = Buffer.from('a camera frame').toString('base64')
+  let prompt
+  const infer = createInference({ model: 'fake-pc', query: (params) => {
+    prompt = params.prompt
+    return (async function* () {
+      // The transport is streaming input, so the whole conversation is one
+      // user message: the JSON first, then the bytes of each frame.
+      assert.equal(typeof prompt, 'object')
+      const sent = []
+      for await (const message of prompt) sent.push(message)
+      assert.equal(sent.length, 1)
+      const blocks = sent[0].message.content
+      assert.equal(sent[0].parent_tool_use_id, null)
+      const json = JSON.parse(blocks[0].text)
+      assert.equal(json.messages.at(-1).images, undefined)
+      assert.match(json.messages.at(-1).content, /One frame from the camera:\n\[image 1\]/)
+      assert.deepEqual(blocks.slice(1), [
+        { type: 'text', text: '[image 1] :' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: frame } },
+      ])
+      yield { type: 'result', subtype: 'success', structured_output: { content: 'Vous tenez une tasse.', calls: [] } }
+    })()
+  } })
+  const conversation = [{ role: 'system', content: 'instructions' }, { role: 'user', content: 'Que tiens-je ?' },
+    { role: 'assistant', content: '', tool_calls: [{ function: { name: 'look', arguments: {} } }] },
+    { role: 'tool', tool_name: 'look', content: 'One frame from the camera:', images: [frame] }]
+  const fetcher = async (_url, init) => Response.json(await infer(JSON.parse(init.body), init.signal))
+  const { value } = await remoteChat(fetcher, 'https://pc.test', conversation,
+    [{ type: 'function', function: { name: 'look', parameters: { type: 'object' } } }]).next()
+  assert.equal(value.message.content, 'Vous tenez une tasse.')
+
+  // A frame that is not base64 is refused before the SDK is started.
+  await assert.rejects(infer({ messages: [{ role: 'user', content: 'x', images: ['not base64!'] }], tools: [] }), /Invalid inference request/)
+})
+
+test('only the newest frames are sent, and an oversized one is dropped rather than refusing the turn', async () => {
+  const frame = (seed) => Buffer.from(seed.repeat(32)).toString('base64')
+  const bodies = []
+  const fetcher = async (_url, { body }) => {
+    assert.ok(Buffer.byteLength(body) <= 256 * 1024)
+    bodies.push(JSON.parse(body))
+    return Response.json({ message: { content: 'ok', tool_calls: [] } })
+  }
+  const look = (seed) => ({ role: 'tool', tool_name: 'look', content: 'One frame from the camera:', images: [frame(seed)] })
+  await remoteChat(fetcher, 'https://pc.test', [{ role: 'system', content: 's' }, { role: 'user', content: 'q' },
+    look('a'), look('b'), look('c')], []).next()
+  // Three looks in one turn, two frames allowed: the oldest is left behind,
+  // and the newest two travel.
+  assert.deepEqual(bodies[0].messages.map((message) => message.images?.length ?? 0), [0, 0, 0, 1, 1])
+  assert.equal(bodies[0].messages[3].images[0], frame('b'))
+
+  // One frame alone over the body budget: the turn still goes, saying so.
+  const huge = 'A'.repeat(300 * 1024)
+  await remoteChat(fetcher, 'https://pc.test',
+    [{ role: 'system', content: 's' }, { role: 'user', content: 'q' },
+      { role: 'tool', tool_name: 'look', content: 'One frame from the camera:', images: [huge] }], []).next()
+  const sent = bodies[1].messages.at(-1)
+  assert.equal(sent.images, undefined)
+  assert.match(sent.content, /image non transmise/)
+})

@@ -12,6 +12,7 @@ import { boundedChat } from './context-window.mjs'
 import { parseFacts } from './memory.mjs'
 import { UI_TOOLS } from './ui-tools.mjs'
 import { DISPLAY_TOOLS } from './display-tools.mjs'
+import { CAMERA_TOOLS } from './camera-tools.mjs'
 
 const bytes = (value) => new TextEncoder().encode(JSON.stringify(value)).length
 
@@ -78,11 +79,19 @@ const browserGroups = (tools) => ({
  * providers get every group directly. On-device Gemma gets one group at a time,
  * with `show`, and switches with select_tools: every group at once does not fit
  * its window.
+ *
+ * The camera is the one capability in no group. `look` and `watch` answer with
+ * a picture, and on-device Gemma is a text model: it would read the sentence
+ * introducing a frame it cannot see and describe something it never looked at.
+ * So they are in the catalogue — PC inference, which does see images, is
+ * offered every tool directly — and out of every group, which is what the
+ * phone's own model is offered. Falling back to Gemma mid-turn therefore takes
+ * them away by the same mechanism, with no separate bookkeeping.
  */
 export function androidCatalogue(phone, pc) {
   let currentPc = pc
   const grouped = toolGroups(GROUPS, {
-    android: phone.tools.filter((tool) => !UI_TOOLS.has(tool.name) && !DISPLAY_TOOLS.has(tool.name)),
+    android: phone.tools.filter((tool) => !UI_TOOLS.has(tool.name) && !DISPLAY_TOOLS.has(tool.name) && !CAMERA_TOOLS.has(tool.name)),
     display: phone.tools.filter((tool) => DISPLAY_TOOLS.has(tool.name)),
     interface: phone.tools.filter((tool) => UI_TOOLS.has(tool.name)),
     pc: pc.tools.filter((tool) => !inBrowser(tool)),
@@ -125,8 +134,11 @@ export function androidCatalogue(phone, pc) {
  * @param {number} [context]  The thinking model's whole context in bytes, when
  *   it is small (on-device Gemma). One tool result is then sized to what the
  *   prompt and the schemas leave free, instead of overflowing the window.
+ * @param {Function} [capture]  A frame from the phone's camera. Supplied only
+ *   when the model of this turn can see images; without it `look` and `watch`
+ *   are not in the catalogue at all.
  */
-export async function androidTools(files, { show, ui, http, context, smallContext = () => true } = {}) {
+export async function androidTools(files, { show, ui, http, capture, context, smallContext = () => true } = {}) {
   const storage = await files.status()
   const memory = await files.readMemory()
   const native = async (name, args) => (await files.run({ name, args })).result
@@ -138,7 +150,10 @@ export async function androidTools(files, { show, ui, http, context, smallContex
     open: (target) => native('open', { target }),
     // The phone's memory file, whole; the rules are the shared ones.
     memory: { read: async () => (await files.readMemory()).text, write: (text) => files.writeMemory({ text }) },
-    show, ui, http,
+    show, ui, http, capture,
+    // The live view and looking through the camera are the same hardware in
+    // the same WebView: a device that can take a frame can also show one.
+    camera: Boolean(capture),
   }
   const tools = deviceTools(platform)
   const intro = `JARVIS sur le téléphone Android. Réponds brièvement en français. ${new Date().toLocaleString('fr-FR', { dateStyle: 'full', timeStyle: 'short' })}.
@@ -154,7 +169,7 @@ Les outils sans préfixe agissent sur le téléphone.`
   // Leave room for the question, the calls and an earlier result cut short;
   // accented text and JSON escapes make a character slightly more than a byte.
   // Sized for the files group, the one whose results are pages.
-  const fileTools = tools.filter((tool) => !UI_TOOLS.has(tool.name) && !DISPLAY_TOOLS.has(tool.name))
+  const fileTools = tools.filter((tool) => !UI_TOOLS.has(tool.name) && !DISPLAY_TOOLS.has(tool.name) && !CAMERA_TOOLS.has(tool.name))
   const fixed = bytes(compose(fileTools, [facts], true)) + bytes(fileTools.map(({ name, description, parameters }) => ({ type: 'function', function: { name, description, parameters } })))
   const paged = deviceTools(platform, { page: (context - fixed - 800) * 0.9 })
   return { tools: tools.map((tool, i) => ({
@@ -193,8 +208,16 @@ export function androidChat({ inference, catalogue, remote, local, discover, can
       }
     }
     const system = catalogue.localSystem()
-    yield* boundedChat(local, messages.map((message) => message.role === 'system' ? { ...message, content: system } : message),
-      catalogue.offer(specs, true), signal)
+    // On-device Gemma is a text model: its runtime takes no picture. A frame
+    // obtained while PC inference was thinking says so in the result it rides
+    // on, rather than leaving Gemma to describe something it never received.
+    const forGemma = messages.map((message) => {
+      if (message.role === 'system') return { ...message, content: system }
+      if (!message.images?.length) return message
+      const { images: _frames, ...rest } = message
+      return { ...rest, content: `${message.content ?? ''}\n[image non lisible par le modèle du téléphone]` }
+    })
+    yield* boundedChat(local, forGemma, catalogue.offer(specs, true), signal)
   }
   return { chat, source: () => source }
 }
