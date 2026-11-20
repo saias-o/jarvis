@@ -21,7 +21,8 @@ export function nativeSpeechChunks(text: string): string[] {
 type Options = {
   synth: Pick<SpeechSynthesis, 'speak' | 'cancel' | 'resume'>
   voice: () => SpeechSynthesisVoice | null
-  lang: string
+  /** A function when the language can change between utterances. */
+  lang: string | (() => string)
   createUtterance?: (text: string) => SpeechSynthesisUtterance
   onStart?: (utterance: SpeechSynthesisUtterance) => void
   onQueue?: (utterance: SpeechSynthesisUtterance) => void
@@ -60,7 +61,7 @@ export function createNativeSpeech(options: Options) {
       active = utterance
       const voice = options.voice()
       if (voice) utterance.voice = voice
-      utterance.lang = voice?.lang ?? options.lang
+      utterance.lang = voice?.lang ?? (typeof options.lang === 'function' ? options.lang() : options.lang)
       utterance.rate = 0.92
       utterance.pitch = 0.95
       let started = false

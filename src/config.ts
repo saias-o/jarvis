@@ -181,17 +181,18 @@ export const KOKORO_VOICE = choice(
 )
 
 /**
- * The language JARVIS hears and speaks, as a BCP 47 tag: the browser's speech
- * recognition listens in it, the system voice is picked from it, and the canned
- * lines follow it. Claude answers in whatever language it is spoken to.
- *   en-GB — the character as written (default)
- *   fr-FR — French; any other tag works for recognition and voice choice, with
- *           the canned lines falling back to English
+ * The language JARVIS starts in, and whether that language is French.
+ *
+ * Defined in lib/language.ts and re-exported here, where everything else
+ * reads its configuration: the detector that decides which language a
+ * sentence is in has to be testable under Node, so it cannot import this
+ * file, and two definitions of one default would be one too many.
+ *
+ * Claude answers in whatever language it is spoken to, and the voice, the
+ * microphone and the canned lines now follow the conversation rather than
+ * this tag, so this is where a session begins and not where it is confined.
  */
-export const VOICE_LANG = str(import.meta.env.VITE_VOICE_LANG) ?? 'en-GB'
-
-/** True when VOICE_LANG is French (fr-FR, fr-CA, fr-BE …). */
-export const IS_FRENCH = /^fr\b/i.test(VOICE_LANG)
+export { VOICE_LANG, IS_FRENCH } from './lib/language'
 
 export const env = {
   anthropicKey: str(import.meta.env.VITE_ANTHROPIC_API_KEY) ?? '',

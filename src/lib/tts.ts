@@ -7,11 +7,11 @@ import {
   TTS_ENGINE,
   KOKORO_VOICE,
   BRIDGE_HTTP_URL,
-  VOICE_LANG,
 } from '../config'
 import * as kokoro from './kokoro'
 import { caps } from './capabilities'
 import { createNativeSpeech } from './nativeSpeech'
+import { detect, spoken, tagFor, type Lang } from './language'
 
 /**
  * Speech output.
@@ -212,12 +212,10 @@ function score(v: SpeechSynthesisVoice): number {
  *  otherwise the picker cycles through a dozen US novelty voices. */
 const USABLE = 40
 
-/** The language part of VOICE_LANG ("fr" for "fr-FR"). */
-const LANG_PREFIX = VOICE_LANG.split(/[-_]/)[0].toLowerCase()
-const IS_ENGLISH = LANG_PREFIX === 'en'
+const prefixOf = (tag: string) => tag.split(/[-_]/)[0].toLowerCase()
 
-function speaksLang(v: SpeechSynthesisVoice): boolean {
-  return v.lang.toLowerCase().split(/[-_]/)[0] === LANG_PREFIX
+function speaks(v: SpeechSynthesisVoice, lang: Lang): boolean {
+  return prefixOf(v.lang) === lang
 }
 
 /**
@@ -225,10 +223,10 @@ function speaksLang(v: SpeechSynthesisVoice): boolean {
  * English, so here it is the region, the quality tier and a male-presenting
  * name that count — a deep male voice still reads closest to the character.
  */
-function scoreOther(v: SpeechSynthesisVoice): number {
+function scoreOther(v: SpeechSynthesisVoice, tag: string): number {
   const n = v.name.toLowerCase()
   let s = 40
-  if (v.lang.toLowerCase().replace('_', '-') === VOICE_LANG.toLowerCase()) s += 25
+  if (v.lang.toLowerCase().replace('_', '-') === tag.toLowerCase()) s += 25
   // Edge's neural "Online (Natural)" voices are far better than the SAPI ones.
   if (n.includes('natural') || n.includes('online')) s += 30
   if (n.includes('premium')) s += 30
@@ -239,48 +237,73 @@ function scoreOther(v: SpeechSynthesisVoice): number {
   return s
 }
 
-/** Best-first list of usable voices — also what the voice picker cycles. */
-export function candidateVoices(): SpeechSynthesisVoice[] {
+/** Best-first list of usable voices in one language — what the picker cycles. */
+export function candidateVoices(lang: Lang = spoken()): SpeechSynthesisVoice[] {
   if (isAndroid || typeof speechSynthesis === 'undefined') return []
-  if (!IS_ENGLISH) {
-    return speechSynthesis
-      .getVoices()
-      .filter(speaksLang)
-      .map((v) => ({ v, s: scoreOther(v) }))
+  const voices = speechSynthesis.getVoices().filter((v) => speaks(v, lang))
+  if (lang !== 'en') {
+    const tag = tagFor(lang)
+    return voices
+      .map((v) => ({ v, s: scoreOther(v, tag) }))
       .sort((a, b) => b.s - a.s)
       .map((x) => x.v)
   }
-  return speechSynthesis
-    .getVoices()
-    .filter((v) => /^en/i.test(v.lang))
+  return voices
     .map((v) => ({ v, s: score(v) }))
     .filter((x) => x.s >= USABLE)
     .sort((a, b) => b.s - a.s)
     .map((x) => x.v)
 }
 
-let cachedVoice: SpeechSynthesisVoice | null | undefined
+/**
+ * One cached choice per language, because the session now speaks both.
+ *
+ * The preference the voice picker saves is keyed by language for the same
+ * reason: auditioning your way to a French voice should not also decide which
+ * Englishman reads the English answers, and a voice chosen for one language
+ * read the other phonetically.
+ */
+const cachedVoices = new Map<Lang, SpeechSynthesisVoice | null>()
+const prefKey = (lang: Lang) => `${VOICE_PREF_KEY}.${lang}`
 
-function pickVoice(): SpeechSynthesisVoice | null {
+function pickVoice(lang: Lang = spoken()): SpeechSynthesisVoice | null {
   if (isAndroid) return null
-  if (cachedVoice !== undefined) return cachedVoice
+  const cached = cachedVoices.get(lang)
+  if (cached !== undefined) return cached
   const all = speechSynthesis.getVoices()
   if (!all.length) return null // not loaded yet — try again next utterance
 
   // Honour an explicit choice made with the voice picker. A saved name that no
   // longer resolves is dropped rather than left to resurrect itself silently
   // if that voice is ever reinstalled.
-  const saved = localStorage.getItem(VOICE_PREF_KEY)
+  const saved = localStorage.getItem(prefKey(lang)) ?? migratedPreference(lang)
   if (saved) {
-    // A voice saved under another language would read every answer with the
-    // wrong accent, so it only counts if it speaks VOICE_LANG.
-    const hit = all.find((v) => v.name === saved && speaksLang(v))
-    if (hit) return (cachedVoice = hit)
-    localStorage.removeItem(VOICE_PREF_KEY)
+    const hit = all.find((v) => v.name === saved && speaks(v, lang))
+    if (hit) {
+      cachedVoices.set(lang, hit)
+      return hit
+    }
+    localStorage.removeItem(prefKey(lang))
   }
 
-  cachedVoice = candidateVoices()[0] ?? all.find(speaksLang) ?? null
-  return cachedVoice
+  const chosen = candidateVoices(lang)[0] ?? all.find((v) => speaks(v, lang)) ?? null
+  cachedVoices.set(lang, chosen)
+  return chosen
+}
+
+/**
+ * The preference from when there was only one language, claimed by whichever
+ * language that voice actually speaks. Read once: after that it lives under
+ * its own key like any other.
+ */
+function migratedPreference(lang: Lang): string | null {
+  const old = localStorage.getItem(VOICE_PREF_KEY)
+  if (!old) return null
+  localStorage.removeItem(VOICE_PREF_KEY)
+  const voice = speechSynthesis.getVoices().find((v) => v.name === old)
+  if (!voice || !speaks(voice, lang)) return null
+  localStorage.setItem(prefKey(lang), old)
+  return old
 }
 
 /** What the HUD should show. Reports the engine actually in use rather than
@@ -298,20 +321,23 @@ export function currentVoiceName(): string {
 /** Step to the next candidate — lets you audition voices on your own machine
  *  rather than trusting a ranking to be right about how they sound. */
 export function cycleVoice(): string {
-  const list = candidateVoices()
+  // The language being spoken right now, so auditioning while he is answering
+  // in French walks the French voices.
+  const lang = spoken()
+  const list = candidateVoices(lang)
   if (!list.length) return 'default'
-  const now = pickVoice()
+  const now = pickVoice(lang)
   const i = list.findIndex((v) => v.name === now?.name)
   const next = list[(i + 1) % list.length]
-  localStorage.setItem(VOICE_PREF_KEY, next.name)
-  cachedVoice = next
+  localStorage.setItem(prefKey(lang), next.name)
+  cachedVoices.set(lang, next)
   return next.name
 }
 
 // Voices load asynchronously in Chrome; the first call usually returns nothing.
 if (typeof speechSynthesis !== 'undefined') {
   speechSynthesis.addEventListener('voiceschanged', () => {
-    cachedVoice = undefined
+    cachedVoices.clear()
     pickVoice()
   })
   pickVoice()
@@ -388,6 +414,7 @@ export function createSpeaker(): Speaker {
 
   let currentAudio: HTMLAudioElement | null = null
   let nativeSpeech: ReturnType<typeof createNativeSpeech> | null = null
+  let sentenceLang: Lang = spoken()
   let drained: Array<() => void> = []
 
   const settleDrained = () => {
@@ -431,7 +458,10 @@ export function createSpeaker(): Speaker {
       diag.engine = 'elevenlabs'
       return fetchCloudAudio(text).catch(() => null)
     }
-    if (TTS_ENGINE === 'kokoro' && !kokoro.isUnavailable()) {
+    // Kokoro carries four British male voices and nothing else, so it is only
+    // asked for English. French through an English Kokoro voice is not an
+    // accent, it is phonetic nonsense; the system voice reads it properly.
+    if (TTS_ENGINE === 'kokoro' && !kokoro.isUnavailable() && (detect(text) ?? spoken()) === 'en') {
       diag.engine = 'kokoro'
       return kokoro.speak(text).catch(() => null)
     }
@@ -504,16 +534,23 @@ export function createSpeaker(): Speaker {
   }
 
   const speakNative = async (text: string): Promise<boolean> => {
+    // The language of this sentence, not of the session: a voice has to match
+    // the words it is reading, and the canned English filler lines can land in
+    // the middle of a French answer.
+    const lang = detect(text) ?? spoken()
     if (isAndroid) {
       diag.spoken++; diag.voice = 'Android'; diag.lastText = text.slice(0, 60)
-      const result = await JarvisSpeech.speak({ text, lang: VOICE_LANG })
+      const result = await JarvisSpeech.speak({ text, lang: tagFor(lang) })
       if (result.completed) diag.started++
       return result.completed
     }
+    // Read by the engine below, per utterance: one speaker lives for a whole
+    // answer, and the answer may change language partway through it.
+    sentenceLang = lang
     nativeSpeech ??= createNativeSpeech({
       synth: speechSynthesis,
-      voice: pickVoice,
-      lang: VOICE_LANG,
+      voice: () => pickVoice(sentenceLang),
+      lang: () => tagFor(sentenceLang),
       onQueue: (utterance) => {
         diag.spoken++
         diag.lastText = utterance.text.slice(0, 60)

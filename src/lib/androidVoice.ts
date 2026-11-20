@@ -17,7 +17,9 @@ const BUSY = 8
 /** A failed session is retried, ever more patiently, for as long as the app runs. */
 const RETRY_MS = [1000, 3000, 8000, 15000]
 
-export async function startAndroidVoice(speech: SpeechEngine, lang: string, h: VoiceHandlers): Promise<Voice> {
+/** `lang` may be a getter: the recognizer is restarted constantly, and the
+ *  conversation's language can change between two of those restarts. */
+export async function startAndroidVoice(speech: SpeechEngine, lang: string | (() => string), h: VoiceHandlers): Promise<Voice> {
   let stopped = false
   let listening = false
   let starting = false
@@ -82,7 +84,7 @@ export async function startAndroidVoice(speech: SpeechEngine, lang: string, h: V
     if (listening || starting || Date.now() < next) return
     starting = true
     const session = ended
-    void speech.start({ lang }).then(() => {
+    void speech.start({ lang: typeof lang === 'function' ? lang() : lang }).then(() => {
       if (stopped || !audible()) void speech.stop()
       else if (session === ended) listening = true
     }).catch((err) => fail(String(err?.message ?? err)))

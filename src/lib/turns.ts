@@ -16,6 +16,7 @@
  */
 
 import type { Phase } from '../store'
+import { noteSpoken } from './language'
 import type { VoiceMode } from './voice'
 
 export type Speaker = {
@@ -135,6 +136,12 @@ export function createTurns(deps: TurnDeps) {
     if (disposed) return
     const mine = ++turn
     const stale = () => mine !== turn
+
+    // Their words, not the answer's, decide what language this conversation is
+    // being held in: it is what the microphone listens in next and what the
+    // canned lines are drawn from. The answer carries itself — the voice is
+    // chosen per sentence, from the sentence.
+    noteSpoken(said)
 
     clearIdle()
     const s = state()

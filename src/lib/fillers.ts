@@ -17,7 +17,7 @@
  *     so it goes at the end, and only sometimes.
  */
 
-import { IS_FRENCH } from '../config'
+import { spoken } from './language'
 
 /** Said as soon as the first tool fires, before any answer exists. */
 const WORKING = [
@@ -76,8 +76,16 @@ function makePicker(pool: string[]) {
   }
 }
 
-const working = makePicker(IS_FRENCH ? WORKING_FR : WORKING)
-export const attention = makePicker(IS_FRENCH ? ATTENTION_FR : ATTENTION)
+// One picker per language, chosen when the line is needed rather than when
+// this module loads: the conversation decides which one speaks, and it can
+// change between two turns.
+const workingEn = makePicker(WORKING)
+const workingFr = makePicker(WORKING_FR)
+const working = () => (spoken() === 'fr' ? workingFr() : workingEn())
+
+const attentionEn = makePicker(ATTENTION)
+const attentionFr = makePicker(ATTENTION_FR)
+export const attention = () => (spoken() === 'fr' ? attentionFr() : attentionEn())
 
 /**
  * Naming the task is warmer than a generic acknowledgement and shows the
@@ -202,7 +210,7 @@ function split(toolName: string): { server: string; tool: string } {
 export function forTool(toolName: string): string {
   // The per-tool lines are English only; a neutral French line beats switching
   // language mid-turn.
-  if (IS_FRENCH) return working()
+  if (spoken() === 'fr') return working()
   const { server, tool } = split(toolName)
   for (const r of pickers) {
     const hit =

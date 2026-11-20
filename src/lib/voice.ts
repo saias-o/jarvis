@@ -1,7 +1,8 @@
 import { isAndroid, JarvisSpeech } from './android'
 import { startAndroidVoice } from './androidVoice'
 import { bridgeFetch } from './bridgeAuth'
-import { BRIDGE_HTTP_URL, VOICE_LANG } from '../config'
+import { BRIDGE_HTTP_URL } from '../config'
+import { spoken, tagFor } from './language'
 import { getMic } from './audio'
 import { speakingNow, speakingSince } from './tts'
 import { startVad, type Vad } from './vad'
@@ -378,7 +379,7 @@ if (typeof window !== 'undefined') {
  * rather than surfacing later as an unexplained deafness, whichever engine runs.
  */
 export async function startVoice(h: VoiceHandlers): Promise<Voice> {
-  if (isAndroid) return startAndroidVoice(JarvisSpeech, VOICE_LANG, h)
+  if (isAndroid) return startAndroidVoice(JarvisSpeech, () => tagFor(spoken()), h)
   try {
     await getMic()
   } catch (err) {
@@ -755,7 +756,12 @@ function startBrowserVoice(h: VoiceHandlers): Voice {
     rec = new Ctor()
     rec.continuous = true
     rec.interimResults = true
-    rec.lang = VOICE_LANG
+    // Read here rather than once at startup: Chrome tears this recognizer down
+    // and spin() builds a new one every few seconds, so a conversation that
+    // has turned French is heard in French from the next session on. A
+    // recognizer cannot take two languages at once, which is why this follows
+    // the conversation instead of trying to cover both.
+    rec.lang = tagFor(spoken())
     rec.onstart = () => {
       running = true
       diag.running = true
