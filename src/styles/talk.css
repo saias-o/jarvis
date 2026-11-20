@@ -1,0 +1,123 @@
+/* ---------------------------------------------------------------------------
+   The talk button, and the interface on a phone
+
+   One breakpoint, and it is about the device rather than the window: a coarse
+   pointer has no space bar, so it gets the button whatever its width; a narrow
+   screen gets the rearranged chrome whatever it is pointed at with.
+   --------------------------------------------------------------------------- */
+
+.talk {
+  display: none;
+  position: fixed;
+  left: 50%;
+  bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+  /* Above the HUD and everything in it, blades included (they stack inside
+     the HUD's own context at 4): with an article open this is still the only
+     way to cut in or ask the next thing. Below the ignition screen (7). */
+  z-index: 6;
+  width: 68px;
+  height: 68px;
+  margin-left: -34px;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--interface) 55%, transparent);
+  background: color-mix(in srgb, var(--interface) 9%, rgba(2, 8, 12, 0.86));
+  color: color-mix(in srgb, var(--interface) 85%, white);
+  box-shadow: 0 0 26px -8px var(--interface);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: background 200ms ease, box-shadow 200ms ease, transform 120ms ease;
+}
+.talk svg { width: 28px; height: 28px; }
+.talk:active { transform: scale(0.94); }
+
+.talk-live {
+  background: color-mix(in srgb, var(--interface) 26%, rgba(2, 8, 12, 0.86));
+  box-shadow:
+    0 0 0 6px color-mix(in srgb, var(--interface) 12%, transparent),
+    0 0 34px -4px var(--interface);
+  animation: talkPulse 1.6s ease-in-out infinite;
+}
+.talk-busy {
+  border-color: rgba(255, 181, 71, 0.6);
+  color: #ffd08a;
+  box-shadow: 0 0 26px -8px #ffb547;
+}
+
+@keyframes talkPulse {
+  0%, 100% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--interface) 12%, transparent), 0 0 34px -4px var(--interface); }
+  50%      { box-shadow: 0 0 0 12px color-mix(in srgb, var(--interface) 4%, transparent), 0 0 40px -2px var(--interface); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .talk-live { animation: none }
+}
+
+@media (pointer: coarse), (max-width: 640px) {
+  .talk { display: grid; }
+
+  /* Everything that used to sit along the bottom edge moves up to clear it. */
+  .hud-bottom { display: none; }
+  .log { bottom: calc(150px + env(safe-area-inset-bottom, 0px)); }
+  .caption { bottom: calc(112px + env(safe-area-inset-bottom, 0px)); }
+  .suggest { bottom: calc(118px + env(safe-area-inset-bottom, 0px)); }
+  .blades-stack { bottom: calc(104px + env(safe-area-inset-bottom, 0px)); }
+}
+
+@media (max-width: 640px) {
+  .corner { width: 26px; height: 26px; }
+  .corner-tl, .corner-tr { top: calc(12px + env(safe-area-inset-top, 0px)); }
+  .corner-bl, .corner-br { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+  .corner-tl, .corner-bl { left: 12px; }
+  .corner-tr, .corner-br { right: 12px; }
+
+  .hud-top {
+    top: calc(24px + env(safe-area-inset-top, 0px));
+    padding: 0 26px;
+    gap: 14px;
+  }
+  .brand-mark { font-size: 14px; letter-spacing: 0.3em; white-space: nowrap; }
+  .brand-sub { display: none; }
+  .status { font-size: 9px; text-align: right; }
+
+  /* The rails flank the reactor on a wide screen; here they would sit on it. */
+  .rail { display: none; }
+
+  .tool-badge { top: calc(64px + env(safe-area-inset-top, 0px)); }
+  .tool-name { max-width: 78vw; }
+
+  .log { width: 88vw; gap: 10px; }
+  .log-line { gap: 10px; }
+  .log-who { flex-basis: 42px; }
+  .caption { max-width: 86vw; font-size: 15px; }
+
+  .suggest {
+    width: 86vw;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    white-space: normal;
+    text-align: center;
+  }
+
+  /* Out of the way of the button, and where a thumb is not covering it. */
+  .error {
+    top: calc(58px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+    max-width: 86vw;
+    font-size: 11px;
+  }
+
+  /* A blade is the subject when it is up, so it takes the width; the height
+     stops short of the talk button. dvh, because a phone's toolbar comes and
+     goes and vh is measured as if it were always hidden. */
+  .bl-compact { width: 94vw; height: min(52dvh, 380px); }
+  .bl-tall,
+  .bl-wide,
+  .bl-full,
+  .bl-expanded { width: 94vw; height: calc(100dvh - 190px - env(safe-area-inset-bottom, 0px)); }
+  .bl-hint { display: none; }
+
+  .ignition-sub { max-width: 200px; line-height: 1.6; }
+}

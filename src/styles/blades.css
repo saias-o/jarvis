@@ -1,0 +1,398 @@
+/* ------------------------------------------------------------------ blades */
+/*
+   The blade stack — the surface for things meant to be looked at rather than
+   glanced at. Panels live down the sides in a fixed narrow column; blades take
+   the middle of the frame, because the whole point of them is that an article
+   needs a readable measure and a picture needs room.
+
+   The stack is centred rather than railed to one side. That does cover the
+   reactor, and it should: when there is something on screen worth reading, the
+   reactor is no longer the subject.
+*/
+.blades-stack {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  /* The container never eats clicks; only the cards inside it do, so the
+     reactor and the rails stay reachable around a small blade. */
+  pointer-events: none;
+}
+
+.bl {
+  position: absolute;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--accent) 11%, rgba(4, 12, 18, 0.94)),
+    color-mix(in srgb, var(--accent) 4%, rgba(2, 8, 12, 0.96))
+  );
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.62),
+    0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent) inset;
+  transform-origin: center center;
+}
+
+/* Only the front blade gets the accent glow; the ones behind read as paper. */
+.bl-front {
+  box-shadow:
+    0 26px 80px rgba(0, 0, 0, 0.7),
+    0 0 34px -10px color-mix(in srgb, var(--accent) 46%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent) inset;
+}
+
+/* Sizes are about how the content is meant to be consumed.
+   `tall` is a reading measure — roughly 60 characters at the body size in
+   page.mjs, which is the width prose is actually legible at. */
+.bl-compact { width: min(90vw, 440px);  height: min(58vh, 380px) }
+.bl-tall    { width: min(92vw, 560px);  height: min(82vh, 900px) }
+.bl-wide    { width: min(88vw, 1080px); height: min(72vh, 720px) }
+.bl-full    { width: 92vw;              height: 88vh }
+.bl-expanded { width: 94vw; height: 92vh }
+
+.bl-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px 9px 14px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.bl-title {
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: color-mix(in srgb, var(--accent) 92%, white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bl-kind {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  opacity: 0.45;
+  margin-right: auto;
+}
+
+.bl-acts { display: flex; gap: 4px }
+
+.bl-btn {
+  pointer-events: auto;
+  appearance: none;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  background: transparent;
+  color: color-mix(in srgb, var(--accent) 80%, white);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 7px;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+.bl-btn:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 46%, transparent);
+}
+
+.bl-body {
+  flex: 1 1 auto;
+  min-height: 0;      /* or the iframe refuses to shrink inside the flex column */
+  overflow: auto;
+  position: relative;
+}
+
+/* A framed document fills the blade. It carries its own scrollbar, its own
+   stylesheet and its own CSP — see bridge/page.mjs. */
+.bl-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color-scheme: dark;
+}
+
+.bl-image,
+.bl-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* contain, not cover: this is the thing being looked at, and cropping the
+     subject out of a photograph to fill a rectangle is the wrong trade. */
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.bl-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+  padding: 12px;
+}
+.bl-thumb {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.bl-markup { padding: 14px 16px; text-transform: none; letter-spacing: normal }
+
+.bl-note {
+  padding: 22px;
+  opacity: 0.6;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 12px;
+}
+
+.bl-hint {
+  position: absolute;
+  bottom: 3.2vh;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  opacity: 0.42;
+  pointer-events: none;
+}
+.bl-hint kbd {
+  font: inherit;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 1px 4px;
+}
+
+/* The body scrollbar inside a blade, matched to the reader view's own. */
+.bl-body::-webkit-scrollbar { width: 9px }
+.bl-body::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--accent) 34%, transparent);
+  border-radius: 9px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bl { transition: none }
+}
+
+/* The slot carries the depth transform; the blade inside it carries the drag.
+   Both need a transform, and one element cannot serve two owners. */
+.bl-slot {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.bl-slot > .bl { pointer-events: auto }
+
+/* Dragged by the header, so the body stays selectable. */
+.bl-head { cursor: grab; user-select: none }
+.bl-head:active { cursor: grabbing }
+.bl-btn { cursor: pointer }
+
+.bl-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  /* Two hairlines, the usual visual shorthand for a resize corner. */
+  background:
+    linear-gradient(135deg, transparent 0 46%,
+      color-mix(in srgb, var(--accent) 60%, transparent) 46% 54%, transparent 54%),
+    linear-gradient(135deg, transparent 0 68%,
+      color-mix(in srgb, var(--accent) 40%, transparent) 68% 76%, transparent 76%);
+  opacity: 0.55;
+  touch-action: none;
+  z-index: 2;
+}
+.bl-grip:hover { opacity: 1 }
+
+/* Image viewer: one coordinate system for pinch, pan and fit. */
+.image-viewer {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: transparent;
+  color: var(--accent);
+  font-family: inherit;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.iv-stage {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: zoom-in;
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--accent) 4%, transparent), transparent 80%), rgba(1, 6, 12, 0.6);
+}
+.iv-stage.iv-zoomed { cursor: grab; }
+.iv-stage.iv-zoomed:active { cursor: grabbing; }
+.iv-image {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: block;
+  max-width: none;
+  pointer-events: none;
+  transform-origin: center;
+  -webkit-user-drag: none;
+  will-change: transform;
+}
+.iv-resolution {
+  position: absolute;
+  bottom: 10px;
+  right: 12px;
+  padding: 4px 7px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 0;
+  background: rgba(1, 6, 12, 0.8);
+  color: color-mix(in srgb, var(--accent) 65%, white);
+  font: 9px 'JetBrains Mono', monospace;
+  letter-spacing: 0.1em;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.iv-button {
+  flex-shrink: 0;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-radius: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--accent) 80%, white);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 140ms ease, color 140ms ease;
+}
+.iv-button svg, .iv-retry svg { width: 20px; height: 20px; flex-shrink: 0; }
+.iv-button:disabled { opacity: 0.3; cursor: default; }
+.iv-button:not(:disabled):active { background: color-mix(in srgb, var(--accent) 18%, transparent); color: white; }
+.iv-button:focus-visible, .iv-stage:focus-visible, .iv-thumbnail:focus-visible,
+.mb-history-item:focus-visible, .iv-retry:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+@media (hover: hover) {
+  .iv-button:not(:disabled):hover { background: color-mix(in srgb, var(--accent) 12%, transparent); color: white; }
+}
+.iv-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px 0;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 3%, transparent);
+}
+.iv-zoom-controls { display: flex; align-items: center; gap: 4px; }
+.iv-percent { min-width: 52px; text-align: center; font: 11px 'JetBrains Mono', monospace; color: color-mix(in srgb, var(--accent) 85%, white); }
+.iv-fit { background: color-mix(in srgb, var(--accent) 7%, transparent); padding: 0 13px; }
+.iv-hint { flex: 0 0 auto; margin: 0; padding: 8px 12px 10px; background: color-mix(in srgb, var(--accent) 3%, transparent); text-align: center; color: color-mix(in srgb, var(--accent) 62%, transparent); font: 8px 'JetBrains Mono', monospace; letter-spacing: 0.06em; line-height: 1.5; }
+.iv-message { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 20px; font-size: 11px; color: color-mix(in srgb, var(--accent) 80%, white); text-align: center; }
+.iv-message > svg { width: 32px; height: 32px; opacity: 0.6; }
+.iv-spinner { width: 22px; height: 22px; border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: iv-spin 800ms linear infinite; }
+@keyframes iv-spin { to { transform: rotate(360deg); } }
+.iv-retry { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 15px; border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent); border-radius: 0; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--accent); font: inherit; text-transform: uppercase; letter-spacing: inherit; cursor: pointer; }
+.iv-gallery { flex: 0 0 auto; display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; padding: 8px 12px 10px; background: color-mix(in srgb, var(--accent) 3%, transparent); scrollbar-width: none; }
+.iv-gallery::-webkit-scrollbar, .mb-history::-webkit-scrollbar { display: none; }
+.markup-image-viewer { display: flex; flex-direction: column; height: 100%; min-height: 0; background: transparent; }
+.markup-image-viewer > .image-viewer { flex: 1 1 0; }
+.markup-view-back { align-self: flex-start; margin: 4px 8px; }
+.bl-markup img[role="button"] { cursor: zoom-in; }
+.bl-markup img[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.iv-thumbnail { position: relative; flex: 0 0 66px; height: 48px; padding: 2px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); border-radius: 0; background: color-mix(in srgb, var(--accent) 6%, transparent); cursor: pointer; }
+.iv-thumbnail img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.iv-thumbnail[aria-current="true"] { border-color: var(--accent); box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 18%, transparent); }
+.iv-thumbnail span { position: absolute; bottom: 3px; right: 3px; background: rgba(1, 6, 12, 0.85); color: var(--accent); padding: 1px 4px; font: 9px 'JetBrains Mono', monospace; }
+
+/* Mobile uses a stable viewer instead of floating, resizable desktop cards. */
+.mobile-blades {
+  position: fixed;
+  inset: calc(12px + env(safe-area-inset-top, 0px)) max(10px, env(safe-area-inset-right, 0px)) calc(104px + env(safe-area-inset-bottom, 0px)) max(10px, env(safe-area-inset-left, 0px));
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  pointer-events: auto;
+  border-radius: 0;
+  color: var(--accent);
+  font-family: inherit;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.mobile-blades > .pk { z-index: 3; pointer-events: none; width: 18px; height: 18px; }
+.mobile-blades.mb-full { inset: 0; border: 0; border-radius: 0; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+.mb-header { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; min-height: 72px; padding: 10px 10px 10px 16px; cursor: default; }
+.mb-heading { flex: 1; min-width: 0; }
+.mb-eyebrow { display: flex; align-items: center; gap: 6px; color: color-mix(in srgb, var(--accent) 65%, transparent); font: 8px 'JetBrains Mono', monospace; letter-spacing: 0.1em; text-transform: uppercase; }
+.mb-eyebrow > span:first-child { width: 4px; height: 4px; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.mb-separator { opacity: 0.45; }
+.mb-heading h2 { margin: 7px 0 0; font-size: 11px; font-weight: 400; line-height: 1.4; letter-spacing: 0.16em; }
+.mb-close { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.mb-content { position: relative; flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.mb-content-image, .mb-content-gallery { overflow: hidden; }
+.mb-content .bl-camera { width: 100%; height: 100%; object-fit: contain; }
+.mb-footer { flex: 0 0 auto; border-top: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); background: color-mix(in srgb, var(--accent) 3%, transparent); }
+.mb-history { display: flex; align-items: center; gap: 8px; padding: 10px 12px 0; overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.mb-history-item { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; min-height: 45px; padding: 4px 10px 4px 4px; border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); border-radius: 0; background: transparent; color: color-mix(in srgb, var(--accent) 55%, white); font: inherit; cursor: pointer; touch-action: manipulation; }
+.mb-history-item[aria-current="true"] { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 12%, transparent); }
+.mb-history-preview { display: grid; place-items: center; width: 40px; height: 32px; overflow: hidden; background: var(--bg); }
+.mb-history-preview img { width: 100%; height: 100%; object-fit: cover; }
+.mb-history-preview svg { width: 18px; height: 18px; }
+.mb-history-number { font: 10px 'JetBrains Mono', monospace; }
+.mb-navigation { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 5px 8px 7px; }
+.mb-nav-button { font-size: 10px; padding: 0 8px; gap: 2px; border-color: transparent; }
+.mb-nav-button svg { width: 17px; }
+.mb-navigation output { font: 10px 'JetBrains Mono', monospace; white-space: nowrap; }
+.mb-navigation output span { opacity: 0.45; }
+body:has(.mb-full) .ask, body:has(.mb-full) .talk { visibility: hidden; }
+@media (max-height: 680px) and (max-width: 760px) {
+  .mb-history, .iv-hint { display: none; }
+  .mb-header { min-height: 60px; padding-top: 5px; padding-bottom: 5px; }
+}
+@media (max-height: 500px) and (pointer: coarse), (max-height: 500px) and (max-width: 760px) {
+  .mobile-blades:not(.mb-full) { top: calc(6px + env(safe-area-inset-top, 0px)); bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+  .mb-header { min-height: 52px; padding-top: 4px; padding-bottom: 4px; }
+  .mb-heading h2 { margin-top: 3px; font-size: 12px; }
+  .mb-eyebrow { font-size: 8px; }
+  .mb-history, .iv-hint { display: none; }
+  .iv-toolbar { padding: 0 10px; }
+  .mb-navigation { padding-top: 0; padding-bottom: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .iv-spinner { animation: none; }
+  .iv-button { transition: none; }
+}
+
+/* A resized blade is sized inline, so the presets must not fight it. */
+.bl[style*="width"] { max-width: none; max-height: none }

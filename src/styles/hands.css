@@ -1,0 +1,131 @@
+/* ------------------------------------------------------------------- hands */
+/*
+   The hand overlay. Above everything, because it shows where a press will land
+   and must never be occluded by the thing it is about to press. pointer-events
+   is none throughout — this is a picture of a pointer, not a pointer; the real
+   events are synthesised and dispatched at whatever is underneath (hands.ts).
+*/
+.hands-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  pointer-events: none;
+}
+
+/* The camera indicator. Deliberately always visible while tracking runs: an
+   interface that can see the room has to say so without being asked. */
+.hands-live {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 96;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: color-mix(in srgb, var(--accent) 90%, white);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, rgba(2, 8, 12, 0.8));
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+.hands-live::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff4d4d;
+  box-shadow: 0 0 8px #ff4d4d;
+  animation: handsPulse 1.6s ease-in-out infinite;
+}
+@keyframes handsPulse {
+  0%, 100% { opacity: 1 }
+  50%      { opacity: 0.35 }
+}
+
+/* The legend. Bottom-left, out of the way of both the reactor and the blade
+   stack, and gone once you have proved you know how it works. */
+.gguide {
+  position: fixed;
+  left: 22px;
+  bottom: 22px;
+  z-index: 96;
+  min-width: 210px;
+  padding: 11px 13px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, rgba(2, 8, 12, 0.86));
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.gguide-head {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 0.6;
+  margin-bottom: 8px;
+}
+.gguide-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 3px 0;
+  font-size: 11px;
+}
+.gguide-icon { width: 17px; font-size: 13px; line-height: 1; filter: saturate(0.2) }
+.gguide-name {
+  width: 44px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 95%, white);
+}
+.gguide-does { opacity: 0.68; font-size: 11px }
+.gguide-foot {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 14%, transparent);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  opacity: 0.45;
+}
+.gguide-foot kbd {
+  font: inherit;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  padding: 0 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hands-live::before { animation: none }
+}
+
+/* Spun in CSS, deliberately. Under framer this was an infinitely repeating
+   animation, and AnimatePresence will not unmount a subtree whose animations
+   never end — which left the whole ignition overlay on top of the interface
+   for the entire session, swallowing every click and every pinch. */
+.ignition-ring { animation: ignitionSpin 18s linear infinite }
+
+@keyframes ignitionSpin {
+  from { transform: rotate(0deg) }
+  to   { transform: rotate(360deg) }
+}
+
+
+@media (prefers-reduced-motion: reduce) {
+  .ignition-ring { animation: none }
+}
+
+/* The live camera inside a blade. Mirrored, because a person expects their own
+   image to behave like a reflection — the frames sent to the model are not. */
+.bl-camera {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+  background: #000;
+}

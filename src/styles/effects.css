@@ -1,0 +1,175 @@
+/* ---------------------------------------------------------------------------
+   One-shot frame effects
+
+   Mounted only while playing (see Effects.tsx), so none of this costs anything
+   at rest. Everything is pointer-events: none — the ignition button and the
+   boot screen sit above the HUD entirely, so nothing here can trap a click.
+   --------------------------------------------------------------------------- */
+
+.fx {
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.fx-play {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* flash ------------------------------------------------------------------- */
+
+.fx-flash {
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--accent) 55%, transparent),
+    transparent 72%
+  );
+  animation: fxFlash 480ms ease-out both;
+}
+
+@keyframes fxFlash {
+  0%   { opacity: 0 }
+  12%  { opacity: 1 }
+  100% { opacity: 0 }
+}
+
+/* scan -------------------------------------------------------------------- */
+
+.fx-scan::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 16vh;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--accent) 26%, transparent) 55%,
+    color-mix(in srgb, var(--accent) 80%, #fff) 92%,
+    transparent
+  );
+  animation: fxScan 900ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes fxScan {
+  from { transform: translateY(-20vh) }
+  to   { transform: translateY(120vh) }
+}
+
+/* pulse ------------------------------------------------------------------- */
+
+/* Centred on the reactor rather than on the viewport — the camera puts it
+   slightly above the middle, and a shockwave that misses its source by 2vh
+   reads as a bug rather than as an effect. */
+.fx-wave {
+  position: absolute;
+  top: calc(50% - 2vh);
+  left: 50%;
+  width: 40vmin;
+  height: 40vmin;
+  margin: -20vmin 0 0 -20vmin;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  box-shadow:
+    0 0 44px color-mix(in srgb, var(--accent) 60%, transparent),
+    inset 0 0 44px color-mix(in srgb, var(--accent) 35%, transparent);
+  animation: fxWave 900ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+.fx-wave:nth-child(2) { animation-delay: 150ms }
+
+@keyframes fxWave {
+  from { transform: scale(0.22); opacity: 0.95 }
+  to   { transform: scale(3.4);  opacity: 0 }
+}
+
+/* glitch ------------------------------------------------------------------ */
+
+/* Slices displace what is *behind* them rather than painting over it —
+   backdrop-filter samples the live scene, so the tear happens to the reactor
+   itself. Stepped timing, because a glitch that eases is a wipe. */
+.fx-slice {
+  position: absolute;
+  left: -8%;
+  width: 116%;
+  opacity: 0;
+  -webkit-backdrop-filter: hue-rotate(90deg) saturate(1.9) contrast(1.08);
+  backdrop-filter: hue-rotate(90deg) saturate(1.9) contrast(1.08);
+  animation: fxTear 620ms steps(1, end) both;
+}
+
+.fx-glitch .fx-slice:nth-child(1) { top: 21%; height: 7%; animation-delay: 0ms }
+.fx-glitch .fx-slice:nth-child(2) { top: 45%; height: 4%; animation-delay: 90ms }
+.fx-glitch .fx-slice:nth-child(3) { top: 67%; height: 9%; animation-delay: 40ms }
+
+@keyframes fxTear {
+  0%, 100% { transform: translateX(0);      opacity: 0 }
+  10%      { transform: translateX(-3.5%);  opacity: 1 }
+  30%      { transform: translateX(2.6%);   opacity: 1 }
+  55%      { transform: translateX(-1.4%);  opacity: 1 }
+  80%      { transform: translateX(0.8%);   opacity: 1 }
+}
+
+/* The chromatic half of the tear: two full-frame casts pulling apart. */
+.fx-glitch::before,
+.fx-glitch::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  animation: fxChroma 620ms steps(2, end) both;
+}
+
+.fx-glitch::before { background: rgba(255, 40, 90, 0.13) }
+.fx-glitch::after  { background: rgba(40, 220, 255, 0.13); animation-direction: reverse }
+
+@keyframes fxChroma {
+  0%, 100% { transform: translateX(0);    opacity: 0 }
+  20%      { transform: translateX(-7px); opacity: 1 }
+  60%      { transform: translateX(6px);  opacity: 0.8 }
+}
+
+/* shake ------------------------------------------------------------------- */
+
+/* Applied to the HUD root by Effects.tsx for the duration, so the chrome takes
+   the hit as one body — the 3D scene is a separate layer and keeps still,
+   which is what sells it as the instruments being knocked rather than the
+   world moving. */
+.hud.fx-shaking {
+  animation: fxShake 520ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes fxShake {
+  0%, 100% { transform: translate(0, 0) }
+  12%      { transform: translate(-11px, 5px) }
+  26%      { transform: translate(9px, -6px) }
+  42%      { transform: translate(-7px, -3px) }
+  58%      { transform: translate(6px, 4px) }
+  74%      { transform: translate(-3px, 2px) }
+  88%      { transform: translate(2px, -1px) }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Displacement is the part that hurts, so it goes; the effects still fire,
+     as a plain fade of the same colour in the same place. */
+  .hud.fx-shaking { animation: none }
+  .fx-slice,
+  .fx-wave,
+  .fx-scan::before,
+  .fx-glitch::before,
+  .fx-glitch::after {
+    animation-name: fxFade;
+    animation-timing-function: ease-out;
+  }
+}
+
+@keyframes fxFade {
+  0%   { opacity: 0 }
+  25%  { opacity: 0.7 }
+  100% { opacity: 0 }
+}

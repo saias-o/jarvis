@@ -1,0 +1,36 @@
+/* ---------------------------------------------------------------------------
+   Which brain is answering
+
+   Shown only while the local model stands in for Claude. Amber rather than
+   the interface colour: it is a state worth noticing, not a fault.
+   --------------------------------------------------------------------------- */
+
+.brain-local {
+  position: fixed;
+  top: 14px;
+  right: 18px;
+  z-index: 96;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: #ffc46b;
+  border: 1px solid rgba(255, 196, 107, 0.35);
+  background: rgba(24, 14, 2, 0.8);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+.brain-why { opacity: 0.65; }
+.brain-why::before { content: '— '; }
+
+@media (pointer: coarse), (max-width: 640px) {
+  /* Under the header, which takes the whole top edge on a narrow screen. */
+  .brain-local {
+    top: calc(56px + env(safe-area-inset-top, 0px));
+    right: 50%;
+    transform: translateX(50%);
+    white-space: nowrap;
+  }
+}

@@ -1,0 +1,128 @@
+/* ---------------------------------------------------------------------------
+   Blades — the tool-execution sweep
+
+   Thin shards raking across the frame at a tilt while a tool runs. Everything
+   here is transform and opacity so the whole sweep stays on the compositor and
+   never touches layout, which matters because it plays over a live 3D scene.
+
+   The band is inset from the top and bottom of the frame rather than filling
+   it: the header and the transcript both have to stay legible through this,
+   and a blade crossing a line of text is noise in the literal sense.
+   --------------------------------------------------------------------------- */
+
+.blades {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 14%;
+  /* Stops well short of the transcript. A four-line log at the bottom of a
+     short viewport reaches roughly 28% up the frame, and a blade crossing a
+     line of text is noise in the literal sense. */
+  bottom: 30%;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  /* Faded at both ends so the sweep reads as light passing through the middle
+     of the frame, and so it never arrives underneath the side rails or the
+     panel columns at full strength. */
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+}
+
+/* A second element for the vertical fade. Two masks on one box needs
+   mask-composite, which is still uneven across engines; nesting is boring and
+   works everywhere. */
+.blade-field {
+  position: absolute;
+  inset: 0;
+  -webkit-mask-image: linear-gradient(transparent, #000 20%, #000 80%, transparent);
+  mask-image: linear-gradient(transparent, #000 20%, #000 80%, transparent);
+}
+
+.blade {
+  position: absolute;
+  left: 0;
+  top: -14%;
+  height: 128%;
+  width: var(--blade-w);
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--accent) 70%, #fff) 46%,
+    var(--accent) 58%,
+    transparent
+  );
+  box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 55%, transparent);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: bladeSweep var(--blade-t) cubic-bezier(0.45, 0, 0.25, 1) var(--blade-d) infinite;
+}
+
+@keyframes bladeSweep {
+  0%   { transform: translateX(-18vw) skewX(var(--blade-k)) scaleY(0.55); opacity: 0 }
+  14%  { opacity: var(--blade-o) }
+  70%  { opacity: var(--blade-o) }
+  100% { transform: translateX(116vw) skewX(var(--blade-k)) scaleY(1); opacity: 0 }
+}
+
+/* Six slivers, all different. Machinery engaging is not a metronome — the
+   widths, tilts and tempos are deliberately co-prime-ish so the pattern never
+   visibly repeats over the few seconds a tool call lasts. The wide, dim ones
+   are the glow the sharp ones travel in. */
+.blade-1 { --blade-w: 2px;  --blade-k: -20deg; --blade-t: 1.55s; --blade-d: 0s;    --blade-o: 0.85; --blade-x: 22vw }
+.blade-2 { --blade-w: 7px;  --blade-k: -20deg; --blade-t: 2.1s;  --blade-d: 0.18s; --blade-o: 0.26; --blade-x: 27vw }
+.blade-3 { --blade-w: 1px;  --blade-k: -13deg; --blade-t: 1.15s; --blade-d: 0.42s; --blade-o: 0.7;  --blade-x: 44vw }
+.blade-4 { --blade-w: 16px; --blade-k: -27deg; --blade-t: 2.6s;  --blade-d: 0.6s;  --blade-o: 0.14; --blade-x: 58vw }
+.blade-5 { --blade-w: 2px;  --blade-k: -27deg; --blade-t: 1.85s; --blade-d: 0.9s;  --blade-o: 0.6;  --blade-x: 63vw }
+.blade-6 { --blade-w: 3px;  --blade-k: -8deg;  --blade-t: 1.35s; --blade-d: 1.25s; --blade-o: 0.5;  --blade-x: 78vw }
+
+/* The name of the tool rides in with the sweep, then holds nearly still long
+   enough to be read, then leaves with it. Sits near the top of the band so it
+   never collides with the headline readout under the reactor. */
+.blade-carrier {
+  position: absolute;
+  left: 50%;
+  top: 4%;
+}
+
+.blade-tool {
+  display: block;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #e6f9ff;
+  text-shadow:
+    0 0 18px var(--accent),
+    0 0 44px color-mix(in srgb, var(--accent) 55%, transparent);
+  will-change: transform, opacity;
+  animation: bladeCarry 3.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.blade-tool::before {
+  content: '⟩ ';
+  opacity: 0.5;
+}
+
+@keyframes bladeCarry {
+  0%   { transform: translateX(-150%) skewX(-18deg); opacity: 0 }
+  18%  { transform: translateX(-58%)  skewX(-4deg);  opacity: 0.92 }
+  72%  { transform: translateX(-42%)  skewX(4deg);   opacity: 0.92 }
+  100% { transform: translateX(45%)   skewX(18deg);  opacity: 0 }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* No sweep. The blades still say "something is running", they just say it as
+     a still frame — parked where each one would have crossed. */
+  .blade {
+    animation: none;
+    opacity: calc(var(--blade-o) * 0.55);
+    transform: translateX(var(--blade-x)) skewX(var(--blade-k));
+  }
+  .blade-tool {
+    animation: none;
+    transform: translateX(-50%);
+    opacity: 0.9;
+  }
+}

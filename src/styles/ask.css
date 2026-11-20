@@ -1,0 +1,96 @@
+/* ---------------------------------------------------------------------------
+   The text field — writing to him instead of speaking
+
+   Outside the HUD, like the talk button, because the HUD ignores the pointer
+   and this is the one thing on screen that has to take it. Quiet until it is
+   focused: on a wide screen it is a line under the transcript, not a chat box.
+   --------------------------------------------------------------------------- */
+
+.ask {
+  position: fixed;
+  left: 50%;
+  bottom: 68px;
+  z-index: 6;
+  display: flex;
+  width: min(460px, 46vw);
+  height: 34px;
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in srgb, var(--interface) 22%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--interface) 4%, rgba(2, 8, 12, 0.6));
+  transition: border-color 200ms ease, box-shadow 200ms ease, background 200ms ease;
+}
+.ask:focus-within {
+  border-color: color-mix(in srgb, var(--interface) 70%, transparent);
+  background: color-mix(in srgb, var(--interface) 7%, rgba(2, 8, 12, 0.9));
+  box-shadow: 0 0 22px -8px var(--interface);
+}
+
+.ask-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 12px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #eaf9ff;
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.ask-input::placeholder {
+  color: color-mix(in srgb, var(--interface) 45%, transparent);
+  letter-spacing: 0.08em;
+}
+
+.ask-send {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--interface) 18%, transparent);
+  background: transparent;
+  color: color-mix(in srgb, var(--interface) 85%, white);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.ask-send svg { width: 18px; height: 18px; }
+.ask-send:disabled { opacity: 0.3; cursor: default; }
+
+/* On a wide screen the field takes the band the caption used to sit in, so
+   what was stacked above the footer moves up by its height. */
+@media (pointer: fine) and (min-width: 641px) {
+  .caption { bottom: 116px; }
+  .suggest { bottom: 122px; }
+  .log { bottom: 156px; }
+}
+
+/* On a phone the field and the talk button share the bottom edge: the field
+   takes the width, the button sits at its right hand. */
+@media (pointer: coarse), (max-width: 640px) {
+  .ask {
+    left: 16px;
+    right: 92px;
+    bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    height: 52px;
+    transform: none;
+    border-radius: 26px;
+  }
+  .ask-input {
+    padding: 0 6px 0 18px;
+    /* 16px is the floor below which iOS zooms the page on focus. */
+    font-size: 16px;
+  }
+  .ask-send { width: 48px; border-left: 0; }
+
+  .talk {
+    left: auto;
+    right: 16px;
+    width: 60px;
+    height: 60px;
+    margin-left: 0;
+  }
+  .talk svg { width: 26px; height: 26px; }
+}

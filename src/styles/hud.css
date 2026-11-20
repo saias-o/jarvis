@@ -1,0 +1,559 @@
+/* --------------------------------------------------------------------- HUD */
+
+.hud {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  color: var(--accent);
+  transition: color 600ms ease;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 11px;
+}
+
+.corner {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  opacity: 0.8;
+}
+.corner-tl { top: 26px; left: 26px; border-right: 0; border-bottom: 0; }
+.corner-tr { top: 26px; right: 26px; border-left: 0; border-bottom: 0; }
+.corner-bl { bottom: 26px; left: 26px; border-right: 0; border-top: 0; }
+.corner-br { bottom: 26px; right: 26px; border-left: 0; border-top: 0; }
+
+.hud-top {
+  position: absolute;
+  top: 44px;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 0 92px;
+}
+
+.brand-mark {
+  display: block;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.42em;
+  text-shadow: 0 0 22px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.brand-sub {
+  display: block;
+  margin-top: 5px;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  opacity: 0.42;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 10px;
+  /* The header is space-between, so with the wordmark hidden the status line
+     would slide to the left edge on its own. Claiming the free space keeps it
+     pinned right whether or not the brand is there — and with both present it
+     changes nothing, since space-between had already used that space up. */
+  margin-left: auto;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.75); }
+}
+
+/* Side rails */
+
+.rail {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 10px;
+}
+.rail-left { left: 92px; }
+.rail-right { right: 92px; align-items: flex-end; }
+
+.rail-title {
+  font-size: 8px;
+  opacity: 0.4;
+  letter-spacing: 0.34em;
+  margin-bottom: 4px;
+}
+
+.rail-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0.82;
+}
+.rail-item.dim { opacity: 0.3; }
+.rail-item.mono { font-family: 'JetBrains Mono', monospace; letter-spacing: 0.1em; }
+
+.tick {
+  width: 5px;
+  height: 5px;
+  background: var(--accent);
+  transform: rotate(45deg);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.meter {
+  width: 3px;
+  height: 96px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  display: flex;
+  align-items: flex-end;
+  margin: 4px 0;
+}
+
+.meter-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent);
+  transform-origin: bottom;
+  transition: transform 90ms linear;
+}
+
+/* Tool badge */
+
+/* The tool readout. This is the moment the interface proves it did something
+   real, so it's set as a headline under the reactor rather than a chip on top
+   of it — no box, no backdrop, just light. */
+.tool-badge {
+  position: absolute;
+  /* Pinned near the top, in its own band with the rest of the status chrome.
+     The centring (x: -50%) is a framer motion prop in Hud.tsx, not here —
+     framer writes `transform` inline on an animated element and would overwrite
+     anything declared in CSS. */
+  top: 74px;
+  left: 50%;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  white-space: nowrap;
+  padding: 7px 16px 7px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent);
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 9%, rgba(2, 10, 12, 0.55));
+  backdrop-filter: blur(5px);
+  box-shadow: 0 0 30px color-mix(in srgb, var(--accent) 22%, transparent);
+  /* Above the panels and the log so a long tool name reads cleanly, but it is a
+     thin chip that never enters the transcript's space to begin with. */
+  z-index: 6;
+}
+
+.tool-kicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 8px;
+  letter-spacing: 0.36em;
+  text-indent: 0.36em;
+  opacity: 0.6;
+  padding-right: 12px;
+  border-right: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.tool-name {
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: 0.24em;
+  text-indent: 0.24em;
+  /* Bounded so a long name truncates rather than stretching the chip off-frame. */
+  max-width: min(52vw, 620px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #f2fbff;
+  text-shadow: 0 0 24px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+@media (max-width: 1100px) {
+  .tool-name { font-size: 12px; letter-spacing: 0.18em; max-width: 60vw; }
+  .tool-badge { top: 60px; }
+}
+
+.spinner {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Conversation log */
+
+.log {
+  position: absolute;
+  left: 50%;
+  bottom: 132px;
+  transform: translateX(-50%);
+  width: min(760px, 68vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-transform: none;
+  letter-spacing: 0.01em;
+}
+
+.log-line {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.log-who {
+  flex: 0 0 54px;
+  font-size: 8px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  opacity: 0.45;
+  padding-top: 3px;
+}
+
+.log-user .log-text { opacity: 0.52; }
+.log-jarvis .log-text {
+  color: #eaf9ff;
+  text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* Live partial transcript while listening */
+
+.caption {
+  position: absolute;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%);
+  font-size: 16px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  color: #fff;
+  opacity: 0.85;
+  max-width: 66vw;
+  text-align: center;
+}
+
+.error {
+  position: absolute;
+  left: 50%;
+  bottom: 52px;
+  transform: translateX(-50%);
+  color: #ff6b6b;
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0.04em;
+  max-width: 70vw;
+  text-align: center;
+}
+
+.hud-bottom {
+  position: absolute;
+  bottom: 44px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 9px;
+  opacity: 0.38;
+  letter-spacing: 0.2em;
+}
+
+kbd {
+  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid currentColor;
+  padding: 1px 5px;
+  font-size: 9px;
+}
+
+/* Bracket corners rather than a full border — instrument markings, not boxes. */
+.pk {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--accent);
+  opacity: 0.85;
+}
+.pk-tl { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+.pk-tr { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+.pk-bl { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+.pk-br { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+
+/* The design system JARVIS composes with. These class names live in three
+   places and all three have to agree: here, in ALLOWED_CLASSES in
+   src/ui/sanitise.ts — anything absent from that set is stripped before it
+   reaches the DOM — and in the `display` tool description in
+   bridge/panels.mjs, which is how the model learns they exist. */
+
+.p-body {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* rows -------------------------------------------------------------------- */
+
+.hud-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.hud-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.hud-idx {
+  flex: 0 0 auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  opacity: 0.45;
+  padding-top: 2px;
+}
+
+.hud-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hud-label {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: #e8f8ff;
+  /* Two lines then clip — a HUD row, not a paragraph. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hud-sub {
+  font-size: 10.5px;
+  line-height: 1.35;
+  opacity: 0.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-tag {
+  flex: 0 0 auto;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.42;
+  padding-top: 3px;
+}
+
+/* media ------------------------------------------------------------------- */
+
+.hud-img {
+  display: block;
+  width: 100%;
+  max-height: 300px;
+  object-fit: cover;
+  /* Pull photographs slightly toward the interface palette so they don't
+     fight the surrounding cyan. */
+  filter: saturate(0.85) contrast(1.05);
+}
+
+.hud-caption {
+  display: block;
+  margin-top: 8px;
+  font-size: 10px;
+  opacity: 0.5;
+}
+
+/* Web media -----------------------------------------------------------------
+
+   Everything below shows something JARVIS found rather than something he made:
+   image-search thumbnails, a clip, a YouTube result. It is loaded through the
+   bridge proxy (see rewriteMedia in src/ui/sanitise.ts), so as far as the page
+   is concerned it all comes from localhost.
+
+   Media stays within its viewer; interactive players opt back into pointer
+   events so the surrounding HUD does not intercept their controls. */
+
+.hud-gallery {
+  display: grid;
+  /* auto-fill rather than a fixed count: the same markup has to work in the
+     280px left column and the 620px wide slot under the reactor. */
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  /* A grid item's default `min-width: auto` is its content's intrinsic width,
+     which is how a 1200px-wide photograph pushes a track past 1fr and blows the
+     row out sideways. */
+  min-width: 0;
+}
+
+.hud-gallery > * {
+  min-width: 0;
+}
+
+.hud-thumb {
+  display: block;
+  width: 100%;
+  /* Fixed ratio so a gallery of mixed portrait and landscape results reads as a
+     grid of tiles rather than a ragged mosaic. */
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  /* Matches .hud-img — pulls photographs toward the interface palette so they
+     don't fight the surrounding cyan. */
+  filter: saturate(0.85) contrast(1.05);
+}
+
+/* A thumbnail leading a row is a tile beside the text, not the row's content —
+   without a basis of its own, `width: 100%` on a flex item makes it fight the
+   label for the whole row. */
+.hud-row > .hud-thumb {
+  flex: 0 0 56px;
+  width: 56px;
+  align-self: center;
+}
+
+.hud-video {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  max-height: 300px;
+  background: #000;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  /* Controls are the whole point of a player. */
+  pointer-events: auto;
+}
+
+/* A 16:9 box for an embed. Written for both shapes the model will produce: the
+   class on a wrapper around the iframe, and the class on the iframe itself. */
+.hud-embed {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  background: #000;
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+/* The wrapper case. An iframe carrying the class itself is already the box —
+   this is a descendant selector, so it doesn't match one. */
+.hud-embed iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+
+/* Media and its caption as one unit, so the caption can't drift onto the next
+   item when several sit in a row. */
+.hud-figure {
+  display: flex;
+  flex-direction: column;
+  margin: 8px 0 0;
+  min-width: 0;
+}
+
+.hud-figure > .hud-caption {
+  margin-top: 6px;
+}
+
+.hud-figure > img,
+.hud-figure > video {
+  max-width: 100%;
+}
+
+/* figures ----------------------------------------------------------------- */
+
+.hud-metric {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 40px;
+  line-height: 1;
+  color: #eafaff;
+  text-shadow: 0 0 30px color-mix(in srgb, var(--accent) 65%, transparent);
+}
+
+.hud-unit {
+  display: block;
+  margin-top: 6px;
+  font-size: 9px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.hud-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  opacity: 0.8;
+  color: #dff4ff;
+}
+
+.hud-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+}
+
+/* Progress bar — width comes from a --v custom property, the one inline style
+   allowed through the sanitiser. */
+.hud-bar {
+  position: relative;
+  height: 2px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  overflow: hidden;
+}
+.hud-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--v, 0) * 100%);
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+.hud-dim { opacity: 0.45; }
+.hud-hot {
+  color: var(--accent);
+  text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 60%, transparent);
+}

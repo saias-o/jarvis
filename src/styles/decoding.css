@@ -1,0 +1,24 @@
+/* ---------------------------------------------------------------------------
+   Decoding text
+
+   JARVIS's half of the transcript resolves out of noise instead of simply
+   appearing. Two spans do the work: the ghost is the live scramble, the veil
+   is the text that has not been reached yet — present in the DOM, and so in
+   the accessibility tree and in the line wrapping, but not painted. Reserving
+   that space is what stops the paragraph reflowing under the reader as the
+   answer streams in.
+   --------------------------------------------------------------------------- */
+
+.decode-ghost {
+  /* Monospace on purpose: the noise should read as a readout rather than as a
+     word that has been mistyped. */
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.92em;
+  color: var(--accent);
+  opacity: 0.62;
+  text-shadow: 0 0 16px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.decode-veil {
+  opacity: 0;
+}

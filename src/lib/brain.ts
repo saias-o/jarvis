@@ -69,20 +69,20 @@ export async function warm(): Promise<void> {
 
 /** The bridge reports its server list twice — from config on connect, then
  *  with live status once the agent boots — so the HUD subscribes. */
-export function watchServers(fn: (servers: string[]) => void): void {
-  if (usingBridge && !isAndroid) bridge.watchServers(fn)
+export function watchServers(fn: (servers: string[]) => void): () => void {
+  return usingBridge && !isAndroid ? bridge.watchServers(fn) : () => {}
 }
 
 /** Blades arrive from `display` and `blade`. Like ui_* commands, this is a bridge capability: the direct path
  *  has no channel for a server to volunteer anything mid-turn. */
-export function watchBlades(fn: (blade: Blade) => void): void {
-  if (usingBridge && !isAndroid) bridge.watchBlades(fn)
+export function watchBlades(fn: (blade: Blade) => void): () => void {
+  return usingBridge && !isAndroid ? bridge.watchBlades(fn) : () => {}
 }
 
 /** Which brain is answering — Claude, or the local model while Claude is out
  *  of reach. Bridge only; the direct path has one brain and no fallback. */
-export function watchBrain(fn: (brain: BrainInfo) => void): void {
-  if (usingBridge && !isAndroid) bridge.watchBrain(fn)
+export function watchBrain(fn: (brain: BrainInfo) => void): () => void {
+  return usingBridge && !isAndroid ? bridge.watchBrain(fn) : () => {}
 }
 
 /**
@@ -94,8 +94,8 @@ export function watchBrain(fn: (brain: BrainInfo) => void): void {
  * server to volunteer anything. On that backend this watcher simply never
  * fires and the interface stays exactly as it ships.
  */
-export function watchUi(fn: (op: string, args: any) => void): void {
-  if (usingBridge && !isAndroid) bridge.watchUi(fn)
+export function watchUi(fn: (op: string, args: any) => void): () => void {
+  return usingBridge && !isAndroid ? bridge.watchUi(fn) : () => {}
 }
 
 /**
@@ -109,8 +109,8 @@ export function watchUi(fn: (op: string, args: any) => void): void {
  */
 export function watchCapture(
   fn: (req: bridge.CaptureRequest) => Promise<bridge.CaptureResult>,
-): void {
-  if (usingBridge && !isAndroid) bridge.watchCapture(fn)
+): () => void {
+  return usingBridge && !isAndroid ? bridge.watchCapture(fn) : () => {}
 }
 
 /**
@@ -145,8 +145,8 @@ export function isConnected(): boolean {
  */
 export function watchConnection(
   fn: (state: bridge.ConnectionState) => void,
-): void {
-  if (usingBridge && !isAndroid) bridge.watchConnection(fn)
+): () => void {
+  return usingBridge && !isAndroid ? bridge.watchConnection(fn) : () => {}
 }
 
 /** Labels for the HUD's SYSTEMS rail. */

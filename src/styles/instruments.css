@@ -1,0 +1,136 @@
+/* ---------------------------------------------------------------------------
+   Instrument layer
+
+   The graduated rings, gauges and reticles that make the reactor read as a
+   cockpit instrument rather than a glowing ball. Sits above the 3D scene
+   (z 1) and below the HUD chrome (z 4), so text and panels always win.
+
+   Everything animates with transform only, on its own compositor layer, and
+   nothing in here re-renders between phase changes.
+   --------------------------------------------------------------------------- */
+
+.instruments {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  /* The reactor sits slightly above centre, matching the 3D camera. */
+  transform: translateY(-2vh);
+}
+
+.instruments svg {
+  /* Tied to the smaller axis so the assembly stays circular and never crops. */
+  width: min(82vmin, 820px);
+  height: min(82vmin, 820px);
+  overflow: visible;
+}
+
+.instruments path,
+.instruments text {
+  transition: stroke 600ms ease, fill 600ms ease;
+}
+
+/* -- strokes -------------------------------------------------------------- */
+
+.ins-tick {
+  stroke: var(--ins);
+  stroke-width: 1;
+  opacity: 0.55;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-tick-major {
+  stroke: var(--ins);
+  stroke-width: 1.4;
+  opacity: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-bar {
+  stroke: var(--ins);
+  stroke-width: 2.2;
+  opacity: 0.75;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-ring {
+  fill: none;
+  stroke: var(--ins);
+  stroke-width: 1;
+  opacity: 0.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-ring-dashed {
+  stroke-dasharray: 46 12 4 12;
+  opacity: 0.8;
+}
+
+.ins-bracket {
+  fill: none;
+  stroke: var(--ins);
+  stroke-width: 1.6;
+  opacity: 0.85;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-spoke {
+  stroke: var(--ins);
+  stroke-width: 1;
+  opacity: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-hex {
+  fill: none;
+  stroke: var(--ins);
+  stroke-width: 1.2;
+  opacity: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+
+.ins-hex-inner {
+  opacity: 0.45;
+}
+
+.ins-label {
+  fill: var(--ins);
+  opacity: 0.75;
+  font: 400 13px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.18em;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+/* -- rotation ------------------------------------------------------------- */
+
+@keyframes ins-cw  { to { transform: rotate(360deg) } }
+@keyframes ins-ccw { to { transform: rotate(-360deg) } }
+
+.ins-spin-cw,
+.ins-spin-cw-slow,
+.ins-spin-ccw,
+.ins-spin-ccw-fast {
+  transform-origin: 0 0;   /* the viewBox is centred on the origin */
+  transform-box: view-box;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  /* Phase changes retime the animation; easing the duration is not possible in
+     CSS, so the transition on stroke carries the change and the speed simply
+     steps. At these tempos the step is not readable as a jump. */
+  transition: none;
+}
+
+.ins-spin-cw        { animation-name: ins-cw;  animation-duration: var(--spin) }
+.ins-spin-cw-slow   { animation-name: ins-cw;  animation-duration: var(--spin-slow) }
+.ins-spin-ccw       { animation-name: ins-ccw; animation-duration: var(--spin) }
+.ins-spin-ccw-fast  { animation-name: ins-ccw; animation-duration: var(--spin-fast) }
+
+@media (prefers-reduced-motion: reduce) {
+  .ins-spin-cw,
+  .ins-spin-cw-slow,
+  .ins-spin-ccw,
+  .ins-spin-ccw-fast { animation: none }
+}

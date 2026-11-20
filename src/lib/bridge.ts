@@ -93,6 +93,7 @@ export const bridgeServers = () => servers
 let onServers: ((s: string[]) => void) | null = null
 export function watchServers(fn: (s: string[]) => void) {
   onServers = fn
+  return () => { if (onServers === fn) onServers = null }
 }
 
 /**
@@ -115,6 +116,7 @@ export type CaptureResult = { data?: string; mimeType?: string; error?: string }
 let onCapture: ((req: CaptureRequest) => Promise<CaptureResult>) | null = null
 export function watchCapture(fn: (req: CaptureRequest) => Promise<CaptureResult>) {
   onCapture = fn
+  return () => { if (onCapture === fn) onCapture = null }
 }
 
 /** Blades arrive the same way panels do — pushed mid-turn, so the article is
@@ -122,6 +124,7 @@ export function watchCapture(fn: (req: CaptureRequest) => Promise<CaptureResult>
 let onBlade: ((blade: Blade) => void) | null = null
 export function watchBlades(fn: (blade: Blade) => void) {
   onBlade = fn
+  return () => { if (onBlade === fn) onBlade = null }
 }
 
 /** Commands that redress the interface — theme, reactor, orbits, effects. Same
@@ -132,6 +135,7 @@ export function watchBlades(fn: (blade: Blade) => void) {
 let onUi: ((op: string, args: any) => void) | null = null
 export function watchUi(fn: (op: string, args: any) => void) {
   onUi = fn
+  return () => { if (onUi === fn) onUi = null }
 }
 
 /** Which brain is answering. The bridge says so whenever it changes: Claude
@@ -139,6 +143,7 @@ export function watchUi(fn: (op: string, args: any) => void) {
 let onBrain: ((brain: BrainInfo) => void) | null = null
 export function watchBrain(fn: (brain: BrainInfo) => void) {
   onBrain = fn
+  return () => { if (onBrain === fn) onBrain = null }
 }
 
 /**
@@ -152,6 +157,7 @@ export type ConnectionState = 'open' | 'lost' | 'reconnected'
 let onConnection: ((state: ConnectionState) => void) | null = null
 export function watchConnection(fn: (state: ConnectionState) => void) {
   onConnection = fn
+  return () => { if (onConnection === fn) onConnection = null }
 }
 
 export function isConnected(): boolean {

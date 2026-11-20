@@ -1,0 +1,96 @@
+/* ---------------------------------------------------------------------------
+   Remote access: the code prompt
+
+   Above everything, the ignition screen included — an unpaired device has no
+   business reaching anything underneath it.
+   --------------------------------------------------------------------------- */
+
+.access {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(ellipse at center, #04121c 0%, #01060c 70%);
+  color: #4fd6ff;
+  text-transform: uppercase;
+}
+
+.access-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: min(100%, 340px);
+  text-align: center;
+}
+
+.access-mark {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  text-shadow: 0 0 26px rgba(79, 214, 255, 0.7);
+}
+
+.access-title {
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  opacity: 0.55;
+}
+
+.access-sub {
+  margin-top: 14px;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: #cfe9ee;
+  opacity: 0.8;
+}
+
+.access-input {
+  width: 100%;
+  padding: 14px 10px;
+  background: rgba(79, 214, 255, 0.05);
+  border: 1px solid rgba(79, 214, 255, 0.35);
+  border-radius: 2px;
+  color: #eafcff;
+  font-family: 'JetBrains Mono', monospace;
+  /* 16px is the floor below which iOS zooms the page on focus. */
+  font-size: 22px;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  text-align: center;
+  text-transform: uppercase;
+  outline: none;
+}
+.access-input::placeholder { color: rgba(79, 214, 255, 0.22); }
+.access-input:focus {
+  border-color: rgba(79, 214, 255, 0.9);
+  box-shadow: 0 0 24px -6px rgba(79, 214, 255, 0.7);
+}
+
+.access-go {
+  width: 100%;
+  padding: 14px 10px;
+  background: rgba(79, 214, 255, 0.12);
+  border: 1px solid rgba(79, 214, 255, 0.6);
+  border-radius: 2px;
+  color: #eafcff;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.access-go:disabled { opacity: 0.35; cursor: default; }
+
+.access-problem {
+  min-height: 1.4em;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: #ff6b6b;
+}
