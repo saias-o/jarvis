@@ -25,6 +25,7 @@ import { toolGroups } from '../shared/tool-groups.mjs'
 import { UI_TOOLS } from '../shared/ui-tools.mjs'
 import { DISPLAY_TOOLS } from '../shared/display-tools.mjs'
 import { CAMERA_TOOLS } from '../shared/camera-tools.mjs'
+import { MUSIC_TOOLS } from '../shared/music-tools.mjs'
 import { moveFile } from './move-file.mjs'
 
 const MAX_READ_BYTES = 4 * 1024 * 1024
@@ -39,8 +40,9 @@ const MAX_READ_BYTES = 4 * 1024 * 1024
  * @param {(op:string, args:object)=>void} [opts.ui]  Redresses the interface (ui_* tools).
  * @param {boolean} [opts.camera]  Whether a blade may open the live camera view.
  * @param {(request: object) => Promise<object>} [opts.capture]  A camera frame from the interface (look, watch).
+ * @param {(op: object) => Promise<string>} [opts.music]  The player in the interface.
  */
-export function localTools({ allowWrites = false, cwd, roots, shell = false, show, ui, camera = false, capture, page } = {}) {
+export function localTools({ allowWrites = false, cwd, roots, shell = false, show, ui, camera = false, capture, music, page } = {}) {
   /** The absolute path, or a thrown sentence saying why not. */
   const vet = (asked) => {
     if (typeof asked !== 'string' || !asked.trim()) throw new Error('no path was given')
@@ -78,6 +80,7 @@ export function localTools({ allowWrites = false, cwd, roots, shell = false, sho
     ui,
     camera,
     capture,
+    music,
     http: webExchange,
   }
 
@@ -180,6 +183,7 @@ const PC_GROUPS = {
   display: 'panels, articles, galleries, videos and PDFs on screen',
   interface: 'colours, reactor, orbits and effects of the interface',
   camera: 'look and watch through the camera',
+  music: 'play music and drive the player on screen',
   browser: 'the user\'s signed-in Chrome: open and read pages',
   browser_act: 'the user\'s Chrome: find, click, type, diagnose',
 }
@@ -192,7 +196,8 @@ const ACTING = /^chrome_(click|type|key|form_input|find|scroll|close_tab|console
  */
 export function localToolGroups(tools) {
   const kind = (tool) => UI_TOOLS.has(tool.name) ? 'interface' : DISPLAY_TOOLS.has(tool.name) ? 'display'
-    : CAMERA_TOOLS.has(tool.name) ? 'camera' : tool.name.startsWith('chrome_') ? (ACTING.test(tool.name) ? 'browser_act' : 'browser') : 'pc'
+    : CAMERA_TOOLS.has(tool.name) ? 'camera' : MUSIC_TOOLS.has(tool.name) ? 'music'
+      : tool.name.startsWith('chrome_') ? (ACTING.test(tool.name) ? 'browser_act' : 'browser') : 'pc'
   const groups = Object.fromEntries(Object.keys(PC_GROUPS).map((group) => [group, tools.filter((tool) => kind(tool) === group)]))
   const grouped = toolGroups(PC_GROUPS, groups)
   const others = grouped.others()

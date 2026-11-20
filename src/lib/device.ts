@@ -14,6 +14,7 @@ import { useStore, type Blade } from '../store'
 import { diagnostics } from './trace'
 import { applyUiOp } from './uiOps'
 import { capture, type CameraRequest } from './capture'
+import { applyMusicOp, type MusicOp } from './player'
 import type { Trace } from '../../shared/trace.mjs'
 
 let active: AbortController | null = null
@@ -137,6 +138,9 @@ export async function ask(prompt: string, handlers: AskHandlers, files: string[]
       capture: pcUrl && inference === 'pc'
         ? ((request: CameraRequest) => capture(request, PHONE_FRAME_WIDTH))
         : undefined,
+      // The player is in this WebView, so the phone drives it with no socket
+      // in the way — the same primitive the PC reaches down the wire.
+      music: (op) => applyMusicOp(op as MusicOp),
       show: async (blade) => {
         if (!hostOnline) blade = await withoutPc(blade)
         useStore.getState().pushBlade({ ...blade, trace: context } as Blade)

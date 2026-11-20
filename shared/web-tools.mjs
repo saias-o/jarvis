@@ -9,6 +9,7 @@
  * already uses) answers when it will not.
  */
 
+import { youtubeTarget } from './youtube.mjs'
 import { vetTarget } from './public-web.mjs'
 import { articleBody, readableText, stripDangerous, titleOf } from './readable.mjs'
 
@@ -185,6 +186,23 @@ async function duckduckgo(http, query, signal) {
     results.push({ title: htmlToText(link[2]), url, snippet: htmlToText(snippet?.[1] ?? '') })
   }
   return results
+}
+
+/**
+ * The first YouTube video a search turns up, or null.
+ *
+ * Here rather than in the music tools because it is a web search like any
+ * other and uses the same engine as `web_search`: one scrape, one set of
+ * failures to understand. The site filter is a hint to the engine, so the
+ * results are checked afterwards — DuckDuckGo honours it loosely and will
+ * happily return a fan page about the song.
+ */
+export async function youtubeSearch(http, query, { signal } = {}) {
+  const results = await duckduckgo(http, `${query} site:youtube.com`, signal)
+  for (const result of results) {
+    if (youtubeTarget(result.url)?.video) return result.url
+  }
+  return null
 }
 
 async function exa(http, query, signal) {

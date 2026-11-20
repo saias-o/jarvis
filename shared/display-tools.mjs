@@ -174,7 +174,11 @@ Choosing what to open:
   image   — one picture, full width of the blade.
   gallery — several pictures at once. This is the answer to an image search.
   video   — a direct .mp4/.webm file.
-  embed   — a YouTube or Vimeo watch URL. It is turned into a player.
+  embed   — a YouTube or Vimeo watch URL, for something to WATCH: it fills a
+            blade and closes when the user next speaks. Anything to LISTEN to,
+            or that they may want to skip, pause or wind forward, belongs in
+            \`play_music\` instead — that player is small, it stays between
+            turns, and it is the only one you can drive afterwards.
   pdf     — a PDF document, shown page by page in a real PDF viewer. For a file
             in the user's Google Drive, pass its Drive link (or its file id)
             straight from the Drive search result — do NOT download it first,

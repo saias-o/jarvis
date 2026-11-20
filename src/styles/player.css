@@ -1,0 +1,240 @@
+/* ---------------------------------------------------------------------------
+   The player.
+
+   Bottom left, opposite the SIGNAL rail, in the one corner nothing else uses:
+   the log is centred, the ask field is centred under it, the rails are at the
+   sides and the blades take the middle. It sits above the blade stack so that
+   opening an article does not bury the thing making the noise.
+
+   Built from the same parts as the rest of the frame rather than as a media
+   widget bolted on: bracketed corners, a hairline rule under the head, labels
+   in letterspaced capitals, a transport of square buttons, and a level line
+   for the position. Nothing is rounded, because nothing else here is.
+   --------------------------------------------------------------------------- */
+
+.player {
+  position: fixed;
+  left: 26px;
+  bottom: 26px;
+  z-index: 7;
+  width: 292px;
+  display: flex;
+  flex-direction: column;
+  color: var(--accent);
+  background: linear-gradient(
+    168deg,
+    color-mix(in srgb, var(--accent) 10%, rgba(3, 10, 16, 0.93)),
+    color-mix(in srgb, var(--accent) 3%, rgba(1, 6, 11, 0.96))
+  );
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow:
+    0 20px 54px rgba(0, 0, 0, 0.62),
+    0 0 26px -14px color-mix(in srgb, var(--accent) 55%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 7%, transparent) inset;
+}
+
+/* -- corner brackets ------------------------------------------------------ */
+
+/* The same mark as the four at the edges of the screen, at a quarter scale:
+   it is what tells you this panel belongs to the same instrument. */
+.player-corner {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  pointer-events: none;
+}
+
+.player-tl { top: -1px; left: -1px; border-right: 0; border-bottom: 0 }
+.player-tr { top: -1px; right: -1px; border-left: 0; border-bottom: 0 }
+.player-bl { bottom: -1px; left: -1px; border-right: 0; border-top: 0 }
+.player-br { bottom: -1px; right: -1px; border-left: 0; border-top: 0 }
+
+/* -- head ----------------------------------------------------------------- */
+
+.player-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 11px;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+/* Lit while the sound is running, dark when it is paused — the one indicator
+   that does not need a word on it. */
+.player-pip {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: none;
+  transition: background 200ms ease, box-shadow 200ms ease;
+}
+
+.player-live .player-pip {
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+  animation: playerPip 1.8s ease-in-out infinite;
+}
+
+@keyframes playerPip {
+  0%, 100% { opacity: 1 }
+  50% { opacity: 0.4 }
+}
+
+.player-kind {
+  margin-right: auto;
+  font-size: 8px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
+/* -- screen --------------------------------------------------------------- */
+
+.player-screen {
+  position: relative;
+  background: #000;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* 16:9 at the panel's width. The frame has to be on screen and a real size:
+   a player hidden at a pixel is both against YouTube's terms and impossible
+   to fall back to when the small transport below is not enough. */
+.player-frame {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  display: block;
+}
+
+/* The same scan the whole interface is under, so the picture sits in the
+   frame rather than on top of it. Nothing catches the pointer. */
+.player-screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, color-mix(in srgb, var(--accent) 7%, transparent) 0 1px, transparent 1px 3px),
+    radial-gradient(120% 80% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.45) 100%);
+  mix-blend-mode: screen;
+  opacity: 0.5;
+}
+
+/* -- position ------------------------------------------------------------- */
+
+.player-rail {
+  height: 2px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  overflow: hidden;
+}
+
+.player-fill {
+  height: 100%;
+  width: 100%;
+  transform-origin: left;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 55%, transparent),
+    var(--accent));
+  box-shadow: 0 0 10px var(--accent);
+  /* The player reports its clock a few times a second; ease between those
+     reports so the line runs instead of stepping. */
+  transition: transform 260ms linear;
+}
+
+/* -- body ----------------------------------------------------------------- */
+
+.player-body {
+  padding: 9px 11px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.player-title {
+  font-size: 11px;
+  line-height: 1.35;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: #eaf9ff;
+  text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 40%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.player-transport {
+  display: flex;
+  gap: 4px;
+}
+
+.player-btn {
+  appearance: none;
+  width: 26px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  background: transparent;
+  color: color-mix(in srgb, var(--accent) 85%, white);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.player-btn:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: 0 0 14px -4px color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
+.player-btn svg { width: 13px; height: 13px }
+
+/* The one that is pressed most, and the only one with a fill behind it. */
+.player-main {
+  width: 32px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* Stop is not transport: it ends the thing. It sits in the head, apart. */
+.player-quit {
+  width: 22px;
+  height: 20px;
+  border-color: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.player-quit svg { width: 11px; height: 11px }
+
+.player-time {
+  margin-left: auto;
+  font: 400 9px/1 'JetBrains Mono', monospace;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.player-dim { opacity: 0.4 }
+
+/* On a phone 292px covers a third of the width and the ask field owns the
+   bottom. Full width above it, and the picture a little shorter. */
+@media (max-width: 640px) {
+  .player {
+    left: 12px;
+    right: 12px;
+    bottom: 94px;
+    width: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-live .player-pip { animation: none }
+  .player-fill { transition: none }
+}

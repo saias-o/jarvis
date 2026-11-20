@@ -46,6 +46,12 @@ export function androidTools(files: {
     => Promise<{ data?: string; mimeType?: string; error?: string }>
   /** Hands one ui_* operation to the interface (shared/ui-tools.mjs). */
   ui?: (op: string, args: unknown) => unknown
+  /**
+   * The player in the interface (shared/music-tools.mjs). Answers with the
+   * sentence the model is given, or throws the reason it could not.
+   */
+  music?: (op: { op: string; video?: string; playlist?: string; source?: string; action?: string; seconds?: number })
+    => Promise<string>
   http?: WebHttp
   /** The thinking model's whole context in bytes, when it is small. */
   context?: number

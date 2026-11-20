@@ -9,6 +9,7 @@ import { AccessGate } from './ui/Access'
 import { Talk } from './ui/Talk'
 import { Ask } from './ui/Ask'
 import { Drop } from './ui/Drop'
+import { Player } from './ui/Player'
 import { takeAttachments } from './lib/upload'
 import { useStore } from './store'
 import { startVoice } from './lib/voice'
@@ -326,6 +327,7 @@ export default function App() {
       <Hud />
       {BOOT_SEQUENCE && <Boot />}
       <Diagnostics />
+      <Player />
       <Ask onSend={turns.sendText} />
       <Drop />
       <Talk onPress={turns.talk} />

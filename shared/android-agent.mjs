@@ -13,6 +13,7 @@ import { parseFacts } from './memory.mjs'
 import { UI_TOOLS } from './ui-tools.mjs'
 import { DISPLAY_TOOLS } from './display-tools.mjs'
 import { CAMERA_TOOLS } from './camera-tools.mjs'
+import { MUSIC_TOOLS } from './music-tools.mjs'
 
 const bytes = (value) => new TextEncoder().encode(JSON.stringify(value)).length
 
@@ -59,6 +60,7 @@ const GROUPS = {
   android: 'fichiers, mémoire et web du téléphone',
   display: 'panneaux, articles, vidéos, PDF',
   interface: 'couleurs, réacteur, effets',
+  music: 'lancer de la musique et piloter le lecteur',
   pc: 'fichiers et commandes du PC',
   browser: 'Chrome du PC : ouvrir, lire',
   browser_act: 'Chrome du PC : chercher, cliquer, saisir',
@@ -91,8 +93,10 @@ const browserGroups = (tools) => ({
 export function androidCatalogue(phone, pc) {
   let currentPc = pc
   const grouped = toolGroups(GROUPS, {
-    android: phone.tools.filter((tool) => !UI_TOOLS.has(tool.name) && !DISPLAY_TOOLS.has(tool.name) && !CAMERA_TOOLS.has(tool.name)),
+    android: phone.tools.filter((tool) => !UI_TOOLS.has(tool.name) && !DISPLAY_TOOLS.has(tool.name)
+      && !CAMERA_TOOLS.has(tool.name) && !MUSIC_TOOLS.has(tool.name)),
     display: phone.tools.filter((tool) => DISPLAY_TOOLS.has(tool.name)),
+    music: phone.tools.filter((tool) => MUSIC_TOOLS.has(tool.name)),
     interface: phone.tools.filter((tool) => UI_TOOLS.has(tool.name)),
     pc: pc.tools.filter((tool) => !inBrowser(tool)),
     ...browserGroups(pc.tools),
@@ -138,7 +142,7 @@ export function androidCatalogue(phone, pc) {
  *   when the model of this turn can see images; without it `look` and `watch`
  *   are not in the catalogue at all.
  */
-export async function androidTools(files, { show, ui, http, capture, context, smallContext = () => true } = {}) {
+export async function androidTools(files, { show, ui, http, capture, music, context, smallContext = () => true } = {}) {
   const storage = await files.status()
   const memory = await files.readMemory()
   const native = async (name, args) => (await files.run({ name, args })).result
@@ -150,7 +154,7 @@ export async function androidTools(files, { show, ui, http, capture, context, sm
     open: (target) => native('open', { target }),
     // The phone's memory file, whole; the rules are the shared ones.
     memory: { read: async () => (await files.readMemory()).text, write: (text) => files.writeMemory({ text }) },
-    show, ui, http, capture,
+    show, ui, http, capture, music,
     // The live view and looking through the camera are the same hardware in
     // the same WebView: a device that can take a frame can also show one.
     camera: Boolean(capture),

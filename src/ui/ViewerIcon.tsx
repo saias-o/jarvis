@@ -9,6 +9,12 @@ const PATHS = {
   fit: 'M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5M9 9h6v6H9z',
   image: 'M4 4h16v16H4zM4 16l5-5 4 4 3-3 4 4M15 8h.01',
   retry: 'M20 7v5h-5M4 17a8 8 0 0 0 14 1M20 12A8 8 0 0 0 6 6L4 8',
+  // Transport. Drawn as strokes like the rest, so a filled triangle would be
+  // the one shape here that is a different language.
+  play: 'M8 5.5v13l11-6.5z',
+  pause: 'M9 5v14M15 5v14',
+  previous: 'M18 6v12L9 12zM6 5v14',
+  next: 'M6 6v12l9-6zM18 5v14',
 }
 
 export function ViewerIcon({ name }: { name: keyof typeof PATHS }) {

@@ -119,6 +119,18 @@ export function watchCapture(fn: (req: CaptureRequest) => Promise<CaptureResult>
   return () => { if (onCapture === fn) onCapture = null }
 }
 
+/**
+ * The player, which answers like the camera rather than being pushed at like
+ * a blade: "next track" on a single video, or "pause" with nothing playing,
+ * are things the model has to be told, and a one-way push can only lie about
+ * them. The reply carries either a sentence or a reason.
+ */
+let onMusic: ((op: Record<string, unknown>) => Promise<string>) | null = null
+export function watchMusic(fn: (op: Record<string, unknown>) => Promise<string>) {
+  onMusic = fn
+  return () => { if (onMusic === fn) onMusic = null }
+}
+
 /** Blades arrive the same way panels do — pushed mid-turn, so the article is
  *  already open as he starts the sentence about it. */
 let onBlade: ((blade: Blade) => void) | null = null
@@ -258,6 +270,21 @@ function dispatch(ws: WebSocket) {
           when: msg.when === 'past' ? 'past' : 'now',
         })
           .then(reply)
+          .catch((err) => reply({ error: String(err?.message ?? err) }))
+      }
+    } else if (msg.type === 'music' && msg.id) {
+      const id = msg.id
+      const reply = (payload: Record<string, unknown>) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'reply', id, ...payload }))
+        }
+      }
+      // Same contract as the camera: always answers, because the bridge is
+      // holding a turn open on it.
+      if (!onMusic) reply({ error: 'The interface has no player.' })
+      else {
+        onMusic(msg as unknown as Record<string, unknown>)
+          .then((text) => reply({ text }))
           .catch((err) => reply({ error: String(err?.message ?? err) }))
       }
     } else if (msg.type === 'brain' && (msg.brain === 'claude' || msg.brain === 'local')) {

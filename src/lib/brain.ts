@@ -115,6 +115,11 @@ export function watchCapture(
   return usingBridge && !isAndroid ? bridge.watchCapture(fn) : () => {}
 }
 
+/** The player, for the same reason: the sound is here, the model is there. */
+export function watchMusic(fn: (op: Record<string, unknown>) => Promise<string>): () => void {
+  return usingBridge && !isAndroid ? bridge.watchMusic(fn) : () => {}
+}
+
 /**
  * Barge-in. Stops the answer on both paths and settles whatever `ask()` call
  * is outstanding, so the caller's await always returns — on the bridge by

@@ -358,6 +358,14 @@ export function createSession({
       // The camera is in the browser: a frame is asked for and awaited. A forward
       // watch takes as long as it says it will, so it gets a longer timeout.
       ...(DISABLED.has('camera') ? {} : { capture: (request) => ask('capture', request, request.mode === 'watch' ? 45_000 : 20_000) }),
+      // The player is in the browser, so the tool asks the browser and waits
+      // for its answer: "next" on a single track has to come back as a reason,
+      // not as a shrug. Quick, so a short leash.
+      music: async (op) => {
+        const reply = await ask('music', op, 10_000)
+        if (reply?.error) throw new Error(String(reply.error))
+        return String(reply?.text ?? 'Done.')
+      },
     }), ...BROWSER_TOOLS]
     const host = { ...androidPcTools.manifest, cwd: WORKSPACE }
     const capabilityContext = agentContext({ tools: localToolset, host })

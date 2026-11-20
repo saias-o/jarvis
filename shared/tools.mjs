@@ -23,16 +23,19 @@
  * @property {boolean} [camera]  Whether a blade may open the live camera view here.
  * @property {(request: object) => Promise<{ data?: string, mimeType?: string, error?: string }>} [capture]
  *   A frame from the camera, for models that can see images; see camera-tools.mjs.
+ * @property {(op: object) => Promise<string>} [music]
+ *   The player in the interface; see music-tools.mjs.
  * @property {Function} [http]  Transport for the web tools; see web-tools.mjs.
  * @property {(command: string, options: { signal?: AbortSignal }) => Promise<string>} [shell]
  */
 
-import { webProbe, webTools } from './web-tools.mjs'
+import { webProbe, webTools, youtubeSearch } from './web-tools.mjs'
 import { validatedTool } from './tool-validation.mjs'
 import { memoryStore } from './memory.mjs'
 import { uiTools } from './ui-tools.mjs'
 import { displayTools } from './display-tools.mjs'
 import { cameraTools } from './camera-tools.mjs'
+import { musicTools } from './music-tools.mjs'
 
 const DOCUMENTS = new Set([
   'pdf', 'doc', 'docx', 'odt', 'ods', 'xls', 'xlsx', 'ppt', 'pptx', 'txt', 'md', 'rtf',
@@ -166,6 +169,14 @@ export function deviceTools(platform, { page = 5000 } = {}) {
   }
   if (platform.ui) tools.push(...uiTools(platform.ui))
   if (platform.capture) tools.push(...cameraTools(platform.capture))
+  // A device with a player can be asked for music. Searching for it by name
+  // needs the web as well, and without that the tool says so rather than
+  // pretending the words were an address.
+  if (platform.music) {
+    tools.push(...musicTools(platform.music, {
+      search: platform.http && ((query, options) => youtubeSearch(platform.http, query, options)),
+    }))
+  }
 
   if (platform.http) tools.push(...webTools(platform.http, { limit: page }))
 

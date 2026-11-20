@@ -12,12 +12,14 @@
  */
 import { useStore } from '../store'
 import { capture } from './capture'
+import { applyMusicOp, type MusicOp } from './player'
 import { applyUiOp } from './uiOps'
 import {
   watchBlades,
   watchBrain,
   watchCapture,
   watchConnection,
+  watchMusic,
   watchServers,
   watchUi,
 } from './brain'
@@ -29,6 +31,9 @@ export function connectBridgeEvents(): () => void {
     watchServers((servers) => store().setConnected(servers)),
     watchBlades((blade) => store().pushBlade(blade)),
     watchCapture(capture),
+    // The player, which answers rather than only receiving: "next" on a
+    // single track is a thing the model has to be told.
+    watchMusic((op) => applyMusicOp(op as unknown as MusicOp)),
     // The interface is JARVIS's to drive. These arrive out of band, pushed
     // mid-turn the way panels are, so a command can retint the reactor or put
     // something into orbit while he is still speaking the sentence about it.

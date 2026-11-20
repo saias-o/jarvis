@@ -11,6 +11,29 @@ export type Phase =
   | 'speaking'  // reading the answer back
 
 /**
+ * What the player in the corner is playing.
+ *
+ * It outlives a turn on purpose, unlike a blade: music asked for three
+ * questions ago is still music, and a player that stopped every time the user
+ * spoke would be useless. Only `stop`, or something else being played, ends
+ * it.
+ *
+ * `title`, `position` and `duration` are what the player reports about itself
+ * — empty and zero until it does, which is a second or so after it loads.
+ */
+export type Music = {
+  /** A video id, a playlist id, or a playlist opened at a track. */
+  video?: string
+  playlist?: string
+  /** The address this came from, for the model to repeat back. */
+  source?: string
+  title: string
+  playing: boolean
+  position: number
+  duration: number
+}
+
+/**
  * A blade — the big surface.
  *
  * A panel is a card you glance at while listening. A blade is the thing you
@@ -238,6 +261,8 @@ type State = {
   bootNote: string
   /** False while sound and the microphone still wait on a first touch. */
   voiceReady: boolean
+  /** What the player is playing, or null when there is no player. */
+  music: Music | null
   /** Blades currently open, newest last — which is also front-most. */
   blades: Blade[]
   /** The blade the user has pulled forward, or null for "the newest one". */
@@ -261,6 +286,10 @@ type State = {
   setLooking: (why: string | null) => void
   setBootNote: (n: string) => void
   setVoiceReady: (ready: boolean) => void
+  playMusic: (m: Pick<Music, 'video' | 'playlist' | 'source'>) => void
+  /** What the player reports about itself, as it reports it. */
+  noteMusic: (m: Partial<Music>) => void
+  stopMusic: () => void
   pushBlade: (b: Blade) => void
   closeBlade: (id: string) => void
   clearBlades: () => void
@@ -295,6 +324,7 @@ export const useStore = create<State>((set) => ({
   voice: '',
   gestures: false,
   looking: null,
+  music: null,
   blades: [],
   focusedBlade: null,
   expandedBlade: null,
@@ -324,6 +354,14 @@ export const useStore = create<State>((set) => ({
    * stops meaning anything. The oldest falls off, which is also the one the
    * user has had longest to look at.
    */
+  // A fresh launch, not a patch: the title and the clock belong to whatever
+  // is playing now, and keeping the old ones would show the previous track's
+  // name over the new one for the second before the player speaks up.
+  playMusic: ({ video, playlist, source }) =>
+    set({ music: { video, playlist, source, title: '', playing: true, position: 0, duration: 0 } }),
+  noteMusic: (patch) => set((s) => (s.music ? { music: { ...s.music, ...patch } } : {})),
+  stopMusic: () => set({ music: null }),
+
   pushBlade: (blade) =>
     set((s) => {
       const next = [...s.blades.filter((b) => b.id !== blade.id), blade].slice(-6)
