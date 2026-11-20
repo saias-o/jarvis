@@ -43,6 +43,14 @@ export function localConfig(env = process.env) {
     ctx: clamp(Number(env.JARVIS_LOCAL_CTX) || 8192, 2048, 131_072),
     /** How long Ollama keeps the model loaded after an answer. */
     keepAlive: env.JARVIS_LOCAL_KEEP_ALIVE?.trim() || '30m',
+    /**
+     * Whether the model may reason before answering. Off by default: on a CPU a
+     * reasoning Gemma spends 50 to 160 tokens thinking before a one-line answer
+     * (a minute or more on a small machine), and with the tool groups it calls
+     * its tools without it. JARVIS_LOCAL_THINK=1 trades that time for more
+     * careful arguments.
+     */
+    think: /^(1|true|on|yes)$/i.test(env.JARVIS_LOCAL_THINK?.trim() ?? ''),
   }
 }
 
@@ -63,7 +71,9 @@ const clip = (text, max) => {
  * @param {typeof fetch} [deps.fetchImpl]  Injectable for tests.
  */
 export function createLocal(config = localConfig(), { fetchImpl = fetch, now = Date.now } = {}) {
-  const { urls, model, ctx, keepAlive } = config
+  const { urls, model, ctx, keepAlive, think = false } = config
+  /** Models that refuse a reasoning setting are sent none from then on. */
+  const noThinkSetting = new Set()
 
   /**
    * Which Ollama has the model, checked in the background.
@@ -114,12 +124,20 @@ export function createLocal(config = localConfig(), { fetchImpl = fetch, now = D
   }
 
   async function* chat(url, body, signal) {
-    // Use the model's native reasoning setting. Forcing think:false can stop
-    // Gemma from producing tool calls, even with a complete tool catalogue.
-    const res = await fetchImpl(`${url}/api/chat`, {
+    const post = (payload) => fetchImpl(`${url}/api/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body), signal,
+      body: JSON.stringify(payload), signal,
     })
+    // Reasoning off unless asked for (see localConfig). A model without a
+    // reasoning mode rejects the setting: it is then left at its default.
+    const key = `${url} ${model}`
+    let res = await post(think || noThinkSetting.has(key) ? body : { ...body, think: false })
+    if (!think && !noThinkSetting.has(key) && res.status === 400) {
+      const reason = await res.text()
+      if (!/think/i.test(reason)) throw new Error(`the local model answered 400: ${clip(reason, 200)}`)
+      noThinkSetting.add(key)
+      res = await post(body)
+    }
     if (!res.ok) {
       // A model that has gone since the last look should be looked for again.
       found = null

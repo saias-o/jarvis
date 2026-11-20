@@ -42,6 +42,57 @@ Audit du 19 novembre 2026 sur Windows, branche `codex/android`, base Git `6933b6
   - [x] `browserTrace` (mode direct) : la taille stockée est comptée une fois par page puis tenue à jour, et la purge supprime les plus anciens seulement au-delà du budget. Mesuré dans le navigateur sur 20 000 enregistrements : 344 ms par ligne avant (parcours complet à chaque ajout), 0,38 ms après (334 ms une seule fois, pour la première ligne de la page). Identifiants, ordre, rotation et masquage des secrets inchangés (`test/trace.test.mjs`). Les traces Android (`appendTrace` en Kotlin) comptaient déjà la taille du fichier et écrivent hors du fil principal.
   - [ ] Mesurer sur téléphone l'ouverture jusqu'à la saisie et au premier tour vocal.
 
+## Vérification finale (20 novembre 2026)
+
+Comparaison avec le commit de base `6933b63`, extrait dans un worktree séparé, installé par `npm ci` et construit avec le même `.env.local`.
+
+**Régressions.** Les 125 tests de `6933b63` ont été rejoués contre le code actuel : 117 passent, 1 est ignoré (propre à WSL) et 7 échouent. Chacun des 7 échecs correspond à un changement de contrat voulu :
+
+- un outil non offert à l'étape est refusé avant d'être exécuté (lot 1) ;
+- le catalogue gagne `display`, `blade` et `probe_url` (lot 5) ;
+- la mémoire passe par une primitive unique `memory` (lot 5) ;
+- l'erreur d'un `kind` invalide vient désormais de la validation du schéma : l'appel est toujours refusé avant tout effet ;
+- trois consignes sont reformulées (image du web, capture d'écran du PC) ;
+- `think: false` avait été retiré pendant le lot 4 ; la mesure ci-dessous l'a fait rétablir, avec un repli pour les modèles qui refusent ce réglage.
+
+Aucun échec ne révèle une perte de comportement. La suite actuelle compte 178 tests : 177 passent, 1 est ignoré (propre à WSL). Le lint ne relève que les deux avertissements de départ.
+
+**Défaut antérieur corrigé pendant la mesure.** Une rafale de connexions a arrêté le bridge. Lancer le CLI Claude peut lever une exception synchrone (`spawn UNKNOWN` sous Windows), et cette exception sortait du gestionnaire WebSocket. Le défaut existait déjà dans `6933b63` (même appel à la connexion). Cet échec compte désormais comme une indisponibilité de Claude : le modèle local répond, ou le tour signale l'erreur en mode Claude seul. Un test sous Windows échoue sans la correction et passe avec.
+
+**Performances de l'appli web.** Builds de production servis par `vite preview`, mesurés dans un Chrome sans interface (profil vierge, Chrome DevTools Protocol), avec le même bridge, les deux versions étant chargées en alternance. « Prêt » est le moment où le champ de saisie existe et où l'état affiché est la veille, donc après la connexion au bridge.
+
+| Mesure | `6933b63` | Après refonte |
+|---|---|---|
+| JavaScript chargé à l'ouverture | 1 740 ko décodés (1 781 ko minifiés, 515 ko gzip) | 1 480 ko décodés (1 516 ko minifiés, 445 ko gzip) |
+| Ouverture à froid, prêt (médiane de 10) | 397 ms | 381 ms |
+| Ouverture à froid, premier rendu (FCP) | 880 ms | 856 ms |
+| Ouverture à froid, temps de script | 948 ms | 901 ms |
+| Ouverture en cache, prêt (médiane de 4 × 4) | 209 à 231 ms | 199 à 205 ms |
+| Ouverture en cache, FCP | 176 ms | 156 à 168 ms |
+| Tas JavaScript après ouverture | 7,7 Mo | 7,0 Mo |
+| Écriture d'une trace sur un journal rempli | 344 ms par ligne (navigateur) ; boucle du bridge bloquée | 0,38 ms par ligne ; boucle du bridge libre |
+
+**Latence d'un tour (modèle local).** Chaque version a été mesurée avec son propre bridge, sur le même Ollama (`gemma4:e2b-it-qat`), par le WebSocket de l'interface. Il n'y avait pas de page affichée : le rendu logiciel de la scène dans un Chrome sans interface prenait le processeur au modèle. Claude refusait l'authentification sur cette machine, donc chaque tour passe par le repli local. Cette machine génère environ 1,5 s par jeton.
+
+La mesure a d'abord révélé une régression. Pendant le lot 4, `think: false` avait été retiré, parce qu'il empêchait Gemma d'appeler ses outils quand elle recevait les 39 outils d'un coup. Gemma raisonnait donc avant chaque réponse : 45 à 76 jetons pour un simple « bonjour », soit 70 à 90 s sur les deux premiers tours de chaque connexion.
+
+Rejoué sur la requête réelle, avec le catalogue réduit du lot 6, `think: false` laisse passer les appels d'outils, 3 sur 3 (`list_files`, `web_search`, `list_files`). Ces appels coûtent 22 à 28 jetons au lieu de 71 à 163. En contrepartie, sans raisonnement, les arguments sont un peu moins justes : chemin `MyDocuments` au lieu de `Documents`, ou `list_files` avant `read_file`. La version d'avant la refonte ne raisonnait pas non plus.
+
+Le raisonnement est donc de nouveau coupé par défaut. `JARVIS_LOCAL_THINK=1` le réactive, et un modèle sans mode de raisonnement est redemandé sans le réglage.
+
+| « Dis juste bonjour », cinq tours sur une connexion | `6933b63` | Après refonte |
+|---|---|---|
+| Premier mot, premier tour (prompt froid) | 8,7 s | 9,1 s |
+| Premier mot, tours suivants | 6,1 / 2,0 / 2,1 / 2,1 s | 1,8 / 2,0 / 1,8 / 1,9 s |
+| Fin de réponse, médiane | 11,5 s | 4,8 s |
+| Jetons de prompt (premier tour) | ≈ 1 350 | ≈ 1 700 (groupes d'outils et leur sélecteur) |
+
+Pour « Cherche sur le web la météo à Vannes aujourd'hui », la version de base répond « Je vais chercher la météo… » sans lancer la recherche, trois fois sur trois. Elle le fait en 21 à 28 s. La version actuelle appelle `web_search` puis répond, en 58 à 94 s.
+
+Dans l'interface (Chrome sans interface, scène affichée), le chemin tapé reste celui du bridge. Le premier mot s'affiche dès la première trame de texte.
+
+**Non vérifié.** Ni le téléphone ni le vrai Claude : aucun appareil n'était branché, et l'identifiant Claude Code de cette machine a expiré. Ces deux cas restent à valider.
+
 ## État de départ
 
 | Vérification | Résultat |

@@ -102,7 +102,7 @@ test('text is streamed as it arrives and returned whole', async () => {
   assert.equal(text, 'Good evening, sir.')
   assert.deepEqual(heard, ['Good ', 'evening, sir.'])
   assert.equal(asked[0].model, 'gemma4:e2b')
-  assert.equal(asked[0].think, undefined)
+  assert.equal(asked[0].think, false)
   assert.equal(asked[0].options.num_ctx, 8192)
   assert.deepEqual(asked[0].messages.map((m) => m.role), ['system', 'user'])
 })
@@ -198,7 +198,7 @@ test('the last step offers no tools, so the model has to answer', async () => {
   assert.equal(asked[2].tools, undefined)
 })
 
-test('reasoning stays at the model default, including models that reject a think override', async () => {
+test('a model without a reasoning mode is asked again without the setting, and not sent it again', async () => {
   rejectThink = true
   try {
     const local = fresh()
@@ -209,6 +209,14 @@ test('reasoning stays at the model default, including models that reject a think
   } finally {
     rejectThink = false
   }
+})
+
+test('reasoning is off unless JARVIS_LOCAL_THINK asks for it', async () => {
+  assert.equal(localConfig({}).think, false)
+  const local = fresh({ JARVIS_LOCAL_THINK: '1' })
+  script.push([{ message: { content: 'Thought about it.' } }])
+  assert.equal(await local.turn('a', { system: 's' }), 'Thought about it.')
+  assert.equal('think' in asked[0], false, 'the model reasons by its own default')
 })
 
 test('an aborted turn rejects instead of answering', async () => {
